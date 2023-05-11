@@ -13,6 +13,9 @@ using Random
 # ╔═╡ 65eda18b-5db7-4c1b-ad7f-f1f6faa71c8a
 using StatsBase
 
+# ╔═╡ 1a0f12ad-86c3-4abd-a038-8ddc021e934e
+using BenchmarkTools
+
 # ╔═╡ b73556c6-e692-4eca-8c80-75d80ecf231e
 using Plots
 
@@ -58,12 +61,48 @@ end
 # ╔═╡ 83f804d0-2d93-413b-9dab-e5bef166d502
 function action(s::State, i::Int, j::Int, r::Vector{Float64})
     p = s.params
-    K = -log(abs(sum((s.path[i, :, j% p.Nt + 1] - r) .^ 2))) / 
+    K = (sum(s.path[i, :, (j)% p.Nt + 1] - r) .^ 2 
+	     + sum((s.path[i, :, (j-2+p.Nt)% p.Nt + 1] - r) .^ 2 )) / 
 		(2 * p.β / p.Nt)
     Vₑ = V(r, p.ω)
     Uₑ = sum(U(r, s.path[k, :, j]) for k in 1:p.Ne if k != i ; init=0)
-    Xₑ = sum((norm(s.path[k, :, j] - r) < p.rₑ && k != i) ? -1.0 : 0.0 for k in 1:p.Ne)
-    K + Vₑ + Uₑ + Xₑ
+    #Xₑ = sum((norm(s.path[k, :, j] - r) < p.rₑ && k != i) ? -1.0 : 0.0 for k in 1:p.Ne)
+    K + Vₑ + Uₑ #+ Xₑ
+end
+
+# ╔═╡ 8654b316-cf71-45d1-b2fd-9ceded5d2a5d
+function centerofmass_update!(s::State)
+	p=s.params
+	i=rand(1:p.Ne)
+
+	r=s.path[i, :, :] .+ p.Δ * randn(3)
+
+    Sₒ = action.(s, i, 1:p.Nt, s.path[i, :, :]) # Broken, need a nice way of partially evaluting this.
+    Sₙ = action.(s, i, 1:p.Nt, r)
+
+    if rand() < exp(-(Sₙ - Sₒ)) #&& !crosses_nodal_surface(s, i, j, r)
+        s.path[i, :, :] = r
+    end
+end
+
+# ╔═╡ 756efc67-b4ce-431e-9f4d-14926260c63d
+let
+	ptest = Params(Ne=2, Nt=100, β=1.0, ω=1.0, Δ=0.1, rₙ=1.0, rₑ=1.0)
+	stest = State(ptest)
+	centerofmass_update!(stest)
+end
+
+# ╔═╡ f749dd08-0f8c-423a-9c4a-79119ae5358d
+function metropolis_update!(s::State)
+    p = s.params
+    i = rand(1:p.Ne)
+    j = rand(1:p.Nt)
+    r = s.path[i, :, j] + p.Δ * randn(3)
+    Sₒ = action(s, i, j, s.path[i, :, j])
+    Sₙ = action(s, i, j, r)
+    if rand() < exp(-(Sₙ - Sₒ)) #&& !crosses_nodal_surface(s, i, j, r)
+        s.path[i, :, j] = r
+    end
 end
 
 # ╔═╡ b0dd8a21-f517-4e73-bc75-9b32e3093d76
@@ -96,19 +135,6 @@ function crosses_nodal_surface(s::State, i::Int, j::Int, r::Vector{Float64})
     any(k -> (norm(s.path[k, :, j] - r) < p.rₙ && k != i), 1:p.Ne)
 end
 
-# ╔═╡ f749dd08-0f8c-423a-9c4a-79119ae5358d
-function metropolis_update!(s::State)
-    p = s.params
-    i = rand(1:p.Ne)
-    j = rand(1:p.Nt)
-    r = s.path[i, :, j] + p.Δ * (rand(3) .- 0.5)
-    Sₒ = action(s, i, j, s.path[i, :, j])
-    Sₙ = action(s, i, j, r)
-    if rand() < exp(-(Sₙ - Sₒ)) && !crosses_nodal_surface(s, i, j, r)
-        s.path[i, :, j] = r
-    end
-end
-
 # ╔═╡ 6df6a3d8-a6bd-4baa-8f12-6ae18c52f751
 function energy(s::State)
     p = s.params
@@ -132,13 +158,56 @@ end
 function run_simulation(p::Params, moves::Dict{Function, Float64}, n_steps::Int, stride::Int)
     s = State(p)
     E_avg = energy(s)
+	traj=[]
     for t in 1:n_steps
         sample([metropolis_update!, bisection_update!], Weights([moves[metropolis_update!], moves[bisection_update!]]))(s)
         if t % stride == 0
             E_avg = (E_avg * (t / stride - 1) + energy(s)) / (t / stride)
-        end
+			append!(traj, [s.path])
+		end
     end
-    E_avg, s
+    E_avg, s, traj
+end
+
+# ╔═╡ 194f526c-7956-426f-aeac-938c0299c2c3
+@benchmark metropolis_update!(State(Params(Ne=3, Nt=40, β=0.2, ω=1.0, Δ=0.01, rₙ=1.0, rₑ=1.0)))
+
+# ╔═╡ 017020dc-933b-4991-aeeb-028285b19ac6
+function plot_traj_Plotsjl(s,traj)
+    p = s.params
+	colors = [:blue, :red, :green, :purple, :orange] 
+	Ncolors=length(colors)
+
+	a=Animation()
+	for t in traj
+		plt=plot3d()
+		for i in 1:p.Ne
+        	x = append!(t[i,1,:], t[i,1,1]) # loop the paths
+        	y = append!(t[i,2,:], t[i,2,1])
+        	z = append!(t[i,3,:], t[i,3,1])
+
+        	plot3d!(x, y, z,
+				linewidth = 2, color = colors[i%Ncolors + 1],label = "Electron $i")
+    	end
+		frame(a,plt)
+	end
+	a
+end
+
+# ╔═╡ 9b1fcb8d-3ac7-43f2-ae62-20a8d1530db3
+begin
+	p = Params(Ne=1, Nt=40, β=1, ω=1.0, Δ=0.01, rₙ=1.0, rₑ=1.0)
+	#moves = Dict(metropolis_update! => 0.5, bisection_update! => 0.5)
+	moves = Dict(metropolis_update! => 1.0, bisection_update! => 0.0)
+	n_steps = 1_000_000
+	stride = n_steps ÷ 10
+	
+	E_avg, s, traj=run_simulation(p, moves, n_steps, stride)
+	
+	println("Average energy: $E_avg")
+	#plot_paths_gnuplot(s)
+	a=plot_traj_Plotsjl(s,traj)
+	gif(a)
 end
 
 # ╔═╡ cfa86086-a635-4870-9092-578f7fab0383
@@ -164,7 +233,8 @@ function plot_paths_gnuplot(s::State)
 
 	colors = ["blue", "red", "green", "purple", "orange"]
 	Ncolors=length(colors)
-	
+
+	@gp "set terminal svg enhanced size 600,600"
 	@gp "set size square"
 	@gp :- "set xlabel 'X' "
 	@gp :- "set ylabel 'Y' "
@@ -178,26 +248,13 @@ function plot_paths_gnuplot(s::State)
 		lc=colors[i%Ncolors + 1]
         @gsp :- x y z " with lp linewidth 2 lc rgb '$lc' t 'Electron $i' "
     end
-	@gp
-end
-
-# ╔═╡ 9b1fcb8d-3ac7-43f2-ae62-20a8d1530db3
-begin
-	p = Params(Ne=1, Nt=30, β=1000.0, ω=100.0, Δ=0.01, rₙ=1.0, rₑ=1.0)
-	#moves = Dict(metropolis_update! => 0.5, bisection_update! => 0.5)
-	moves = Dict(metropolis_update! => 1.0, bisection_update! => 0.0)
-	n_steps = 1_000_000
-	stride = 100
-	
-	E_avg, s=run_simulation(p, moves, n_steps, stride)
-	
-	println("Average energy: $E_avg")
-	plot_paths_gnuplot(s)
+	return @gp
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 Gnuplot = "dc211083-a33a-5b79-959f-2ff34033469d"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
@@ -205,6 +262,7 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
+BenchmarkTools = "~1.3.2"
 Gnuplot = "~1.4.1"
 Plots = "~1.38.9"
 StatsBase = "~0.33.21"
@@ -216,7 +274,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.9.0"
 manifest_format = "2.0"
-project_hash = "bddb2c837ceb0f9df5c4936d697a5bfc40af2579"
+project_hash = "91ce5116b8fd5bfd7b001635e4346d26185aab31"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -227,6 +285,12 @@ uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
+
+[[deps.BenchmarkTools]]
+deps = ["JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
+git-tree-sha1 = "d9a9701b899b30332bbcb3e1679c41cce81fb0e8"
+uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+version = "1.3.2"
 
 [[deps.BitFlags]]
 git-tree-sha1 = "43b1a4a8f797c1cddadf60499a8a077d4af2cd2d"
@@ -766,6 +830,10 @@ version = "1.3.0"
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
+[[deps.Profile]]
+deps = ["Printf"]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
+
 [[deps.Qt5Base_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "OpenSSL_jll", "Pkg", "Xorg_libXext_jll", "Xorg_libxcb_jll", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_keysyms_jll", "Xorg_xcb_util_renderutil_jll", "Xorg_xcb_util_wm_jll", "Zlib_jll", "xkbcommon_jll"]
 git-tree-sha1 = "0c03844e2231e12fda4d0086fd7cbe4098ee8dc5"
@@ -1188,6 +1256,8 @@ version = "1.4.1+0"
 # ╠═fe4c179a-bbeb-46a8-8bc5-6fdca2f358f5
 # ╠═df1e127b-7fc3-43ca-a05b-59e5381d75a2
 # ╠═83f804d0-2d93-413b-9dab-e5bef166d502
+# ╠═8654b316-cf71-45d1-b2fd-9ceded5d2a5d
+# ╠═756efc67-b4ce-431e-9f4d-14926260c63d
 # ╠═f749dd08-0f8c-423a-9c4a-79119ae5358d
 # ╠═b0dd8a21-f517-4e73-bc75-9b32e3093d76
 # ╠═28a2c299-89d6-47d3-8474-ba10c0531cb0
@@ -1195,7 +1265,10 @@ version = "1.4.1+0"
 # ╠═6df6a3d8-a6bd-4baa-8f12-6ae18c52f751
 # ╠═5727c703-246d-4b5d-b4b1-368719f299c9
 # ╠═9b1fcb8d-3ac7-43f2-ae62-20a8d1530db3
+# ╠═1a0f12ad-86c3-4abd-a038-8ddc021e934e
+# ╠═194f526c-7956-426f-aeac-938c0299c2c3
 # ╠═b73556c6-e692-4eca-8c80-75d80ecf231e
+# ╠═017020dc-933b-4991-aeeb-028285b19ac6
 # ╠═cfa86086-a635-4870-9092-578f7fab0383
 # ╠═b2abcf83-77a1-4f75-89d8-8f6eec2b8cba
 # ╠═5652f370-7246-49df-a0d4-6fc47db787f5

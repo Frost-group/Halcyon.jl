@@ -30,6 +30,9 @@ begin
 	const delta = 0.01 # size of displacement / change in momentum move
 end
 
+# ╔═╡ 6d68fd3e-4377-453d-a8d7-5a458f3304f6
+Nτ
+
 # ╔═╡ 1d80c4f5-0d5a-42e1-ba21-8e51d0d89b1f
 # Define the potential energy function
 function V(x)
@@ -189,9 +192,9 @@ UnicodePlots = "~3.4.0"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.9.0-beta4"
+julia_version = "1.9.0"
 manifest_format = "2.0"
-project_hash = "b7f43ce8809706e056b655ffbd6c0f7b9476622a"
+project_hash = "c82d1877fded7c392f5073ee216186c952604d0e"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -390,7 +393,7 @@ uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
 [[deps.MbedTLS_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "c8ffd9c3-330d-5841-b78e-0817d7145fa1"
-version = "2.28.0+0"
+version = "2.28.2+0"
 
 [[deps.Missings]]
 deps = ["DataAPI"]
@@ -415,7 +418,7 @@ version = "1.2.0"
 [[deps.OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
 uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
-version = "0.3.21+0"
+version = "0.3.21+4"
 
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -590,7 +593,7 @@ version = "1.2.13+0"
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
-version = "5.4.0+0"
+version = "5.7.0+0"
 
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -607,6 +610,7 @@ version = "17.4.0+0"
 # ╠═c96a6ec8-fd82-4f77-83eb-8f2f31e8fb22
 # ╠═d274124c-a3ab-4339-949f-723f05706582
 # ╠═5076bffe-7a6a-4c09-a140-7b6c01b6f121
+# ╠═6d68fd3e-4377-453d-a8d7-5a458f3304f6
 # ╠═1d80c4f5-0d5a-42e1-ba21-8e51d0d89b1f
 # ╠═ec430cd7-6676-407d-b6dd-7ac1d6f43bfd
 # ╠═9d1d682e-8d12-42d5-9b8b-cbd8e3b4c8b5
