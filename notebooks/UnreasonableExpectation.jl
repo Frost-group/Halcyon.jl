@@ -64,13 +64,14 @@ end
 # ╔═╡ 83f804d0-2d93-413b-9dab-e5bef166d502
 function action(s::State, i::Int, j::Int, r::Vector{Float64})
     p = s.params
-    K = (sum(s.path[i, :, (j)% p.Nt + 1] - r) .^ 2 
+    T = (sum(s.path[i, :, (j)% p.Nt + 1] - r) .^ 2 
 	     + sum((s.path[i, :, (j-2+p.Nt)% p.Nt + 1] - r) .^ 2 )) / 
 		(2 * p.β / p.Nt)
     Vₑ = V(r, p.ω)
     Uₑ = sum(U(r, s.path[k, :, j]) for k in 1:p.Ne if k != i ; init=0)
     #Xₑ = sum((norm(s.path[k, :, j] - r) < p.rₑ && k != i) ? -1.0 : 0.0 for k in 1:p.Ne)
-    K + Vₑ + Uₑ #+ Xₑ
+	# Lagrangian, so shouldn't this be T-V ?
+    T + Vₑ + Uₑ #+ Xₑ
 end
 
 # ╔═╡ 759916b1-a2c3-417e-a578-48162bdeba30
@@ -83,8 +84,8 @@ function centreofmass_update!(s::State)
 
 	rΔ=p.Δ * randn(3)
 
-    Sₒ = sum( action(s, i, j, s.path[i, :, j]) for j in 1:p.Ne) 
-	Sₙ = sum( action(s, i, j, rΔ+s.path[i, :, j]) for j in 1:p.Ne)
+    Sₒ = sum( action(s, i, j, s.path[i, :, j]) for j in 1:p.Nt) 
+	Sₙ = sum( action(s, i, j, rΔ+s.path[i, :, j]) for j in 1:p.Nt)
     ΔS = Sₙ - Sₒ
 	
     if ΔS<0 || rand() < exp(-ΔS) #&& !crosses_nodal_surface(s, i, j, r)
@@ -147,7 +148,7 @@ end
 # ╔═╡ 6df6a3d8-a6bd-4baa-8f12-6ae18c52f751
 function energy(s::State)
     p = s.params
-    K = sum(sum(
+    T = sum(sum(
 		sum((s.path[i, :, j] - s.path[i, :, j% p.Nt + 1]) .^ 2) 
 			for i in 1:p.Ne) 
 				for j in 1:p.Nt) / (p.β / p.Nt)
@@ -160,7 +161,7 @@ function energy(s::State)
 			for k in 1:p.Ne if k > i ; init=0) 
 				for i in 1:p.Ne ) 
 					for j in 1:p.Nt ) / p.Nt
-	K + Vₑ + Uₑ
+	T + Vₑ + Uₑ
 end
 
 # ╔═╡ 5727c703-246d-4b5d-b4b1-368719f299c9
@@ -208,7 +209,7 @@ end
 
 # ╔═╡ 9b1fcb8d-3ac7-43f2-ae62-20a8d1530db3
 begin
-	p = Params(Ne=1, Nt=40, β=0.001, ω=1.0, Δ=0.01, rₙ=1.0, rₑ=1.0)
+	p = Params(Ne=1, Nt=10, β=1, ω=1.0, Δ=0.01, rₙ=1.0, rₑ=1.0)
 	#moves = Dict(metropolis_update! => 0.5, bisection_update! => 0.5)
 	moves = Dict(centreofmass_update! => 0.1, metropolis_update! => 1.0, bisection_update! => 0.0)
 	n_steps = 1_000_000
