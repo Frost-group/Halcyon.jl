@@ -70,7 +70,6 @@ function action(s::State, i::Int, j::Int, r::Vector{Float64})
     Vₑ = V(r, p.ω)
     Uₑ = sum(U(r, s.path[k, :, j]) for k in 1:p.Ne if k != i ; init=0)
     #Xₑ = sum((norm(s.path[k, :, j] - r) < p.rₑ && k != i) ? -1.0 : 0.0 for k in 1:p.Ne)
-	# Lagrangian, so shouldn't this be T-V ?
     T + Vₑ + Uₑ #+ Xₑ
 end
 
