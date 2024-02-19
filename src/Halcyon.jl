@@ -8,8 +8,7 @@ module Halcyon
 # as it becomes clear where things should lie.
 include("types.jl") 
 #include("system.jl")
-include("potentials.jl") #1D potentials for testing
-#include("Schrodinger.jl") # discretised TISE solver
+include("potentials.jl") 
 include("PIMC.jl") # Path integrals for the win
 
 end # module

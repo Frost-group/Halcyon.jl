@@ -8,11 +8,8 @@ struct System
     mass ::Float64
     spatialdimensions ::Int64
 
-    p::Array{Float64,3}
-
     function System(nbeads::Integer, nparticles::Integer; mass=1.0, spatialdimensions=3)
-        p=rand(nparticles, nbeads, spatialdimensions)
-        new(nparticles, nbeads, mass, spatialdimensions, p)
+        new(nparticles, nbeads, mass, spatialdimensions)
     end
 end
 
@@ -24,10 +21,10 @@ mutable struct Path
     next::Array{Int64}
     prev::Array{Int64}
 
-    function Path(nparticles::Integer, nbeads::Integer=1; spatialdimensions=3)
-        r=rand(nparticles,nbeads,spatialdimensions)
-        next=reshape(repeat(2:nbeads+1, nparticles), nparticles, nbeads) 
-        prev=reshape(repeat(0:nbeads-1, nparticles), nparticles, nbeads)
+    function Path(S::System)
+        r=rand(S.nparticles,S.nbeads,S.spatialdimensions)
+        next=reshape(repeat(2:S.nbeads+1, S.nparticles), S.nparticles, S.nbeads) 
+        prev=reshape(repeat(0:S.nbeads-1, S.nparticles), S.nparticles, S.nbeads)
         new(r,next,prev)
     end
 end
