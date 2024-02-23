@@ -23,9 +23,8 @@ mutable struct Path
 
     function Path(S::System)
         r=rand(S.nparticles,S.nbeads,S.spatialdimensions)
-        next=reshape(repeat(2:S.nbeads+1, S.nparticles), S.nparticles, S.nbeads) 
-        prev=reshape(repeat(0:S.nbeads-1, S.nparticles), S.nparticles, S.nbeads)
-        new(r,next,prev)
+        list=reshape(repeat(1:S.nparticles, S.nbeads), S.nparticles, S.nbeads) 
+        new(r,list,list)
     end
 end
 
