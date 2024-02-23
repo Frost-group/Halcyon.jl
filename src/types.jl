@@ -14,7 +14,7 @@ struct System
 end
 
 # Central path structure
-# Contains a ~linked list with next and prev
+# Contains a ~linked list with next and prev; to allow for sampled particle exchange
 # Objects are mutable vectors, so the struct is fixed in memory, but contents mutable
 mutable struct Path
     r::Array{Float64,3}
