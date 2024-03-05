@@ -15,7 +15,9 @@ end
 
 # Central path structure
 # Contains a ~linked list with next and prev; to allow for sampled particle exchange
-# Objects are mutable vectors, so the struct is fixed in memory, but contents mutable
+# Contains a ~linked list with next and prev
+# Intent: Rewrite (?) this with StaticArrays MVectors; for
+#  so the struct can be constant in memory, but contents mutable
 mutable struct Path
     r::Array{Float64,3}
     next::Array{Int64}
