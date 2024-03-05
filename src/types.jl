@@ -8,13 +8,13 @@ struct System
     mass ::Float64
     spatialdimensions ::Int64
     β ::Float64
+    potential ::Function
 
-
-    function System(nbeads::Integer, nparticles::Integer; mass=1.0, spatialdimensions=3, β=100.0)
-        new(nparticles, nbeads, mass, spatialdimensions, β)
+    function System(nbeads::Integer, nparticles::Integer; mass=1.0, spatialdimensions=3, β=100.0, potential=Harmonic)
+        new(nparticles, nbeads, mass, spatialdimensions, β, potential)
     end
 end
-Base.show(io::IO, s::System) = print(io, "PIMC system with $(s.nbeads) beads and $(s.nparticles) particles. \nParticle mass of $(s.mass). $(s.spatialdimensions) spatial dimensions.")
+Base.show(io::IO, s::System) = print(io, "PIMC system with $(s.nbeads) beads and $(s.nparticles) particles. \nβ=$(s.β). Potential=$(s.potential)\nParticle mass of $(s.mass). $(s.spatialdimensions) spatial dimensions." )
 
 # Central path structure
 # Contains a ~linked list with next and prev; to allow for sampled particle exchange

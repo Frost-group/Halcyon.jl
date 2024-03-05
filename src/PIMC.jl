@@ -16,10 +16,14 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
-function localMove!(sys,path; verbose=false)
-    particle=rand(1:sys.nparticles)
-    bead=rand(1:sys.nbeads)
-    Δ=randn(sys.spatialdimensions)
+function localMove!(system,path; moves=1, verbose=false)
+    for m in 1:moves # this loop brought within the function
+        # I don't understand why, but otherwise you get a lot of allocations (12!) from
+        # dereferencing system.potential for every run of the function. 
+
+    particle=rand(1:system.nparticles)
+    bead=rand(1:system.nbeads)
+    Δ=randn(system.spatialdimensions)
 
     @inbounds begin
     pold=@view path.r[particle,bead,:]
@@ -27,12 +31,12 @@ function localMove!(sys,path; verbose=false)
 
     
     Sold = Harmonic(pold) +
-        sum(abs2, (pold .- @view path.r[path.prev[particle, bead], mod1(bead - 1, sys.nbeads), :])) +
-        sum(abs2, (pold .- @view path.r[path.next[particle, bead], mod1(bead + 1, sys.nbeads), :]))
+        sum(abs2, (pold .- @view path.r[path.prev[particle, bead], mod1(bead - 1, system.nbeads), :])) +
+        sum(abs2, (pold .- @view path.r[path.next[particle, bead], mod1(bead + 1, system.nbeads), :]))
 
     Snew = Harmonic(pnew) +
-        sum(abs2, (pnew .- @view path.r[path.prev[particle, bead], mod1(bead - 1, sys.nbeads), :])) +
-        sum(abs2, (pnew .- @view path.r[path.next[particle, bead], mod1(bead + 1, sys.nbeads), :]))
+        sum(abs2, (pnew .- @view path.r[path.prev[particle, bead], mod1(bead - 1, system.nbeads), :])) +
+        sum(abs2, (pnew .- @view path.r[path.next[particle, bead], mod1(bead + 1, system.nbeads), :]))
     end
 
     ΔS=Snew-Sold
@@ -41,9 +45,10 @@ function localMove!(sys,path; verbose=false)
         println("localMove! particle=$particle bead=$bead Δ=$Δ pold=$pold pnew=$pnew Sold=$Sold Snew=$Snew ΔS=$ΔS")
     end
 
-    if ΔS ≤ 0 || rand() < exp(-sys.β * ΔS)
+    if ΔS ≤ 0 || rand() < exp(-system.β * ΔS)
         if verbose println("Accept!") end
         @inbounds path.r[particle,bead,:]=pnew
+    end
     end
 end
 

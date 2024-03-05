@@ -11,7 +11,7 @@ include("potentials.jl")
     Halcyon.localMove!(system,path,verbose=true)
     @time Halcyon.localMove!(system,path)
     println("Now 1_000_000 moves...")
-    @time for i in 1:1_000_000 Halcyon.localMove!(system,path) end
+    @time Halcyon.localMove!(system,path,moves=1_000_000)
     Halcyon.localMove!(system,path,verbose=true)
     println("Rattle rattle... should be lower in energy.")
 end
