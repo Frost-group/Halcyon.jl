@@ -12,6 +12,7 @@ struct System
         new(nparticles, nbeads, mass, spatialdimensions)
     end
 end
+Base.show(io::IO, s::System) = print(io, "PIMC system with $(s.nbeads) beads and $(s.nparticles) particles. \nParticle mass of $(s.mass). $(s.spatialdimensions) spatial dimensions.")
 
 # Central path structure
 # Contains a ~linked list with next and prev; to allow for sampled particle exchange
@@ -28,5 +29,9 @@ mutable struct Path
         list=reshape(repeat(1:S.nparticles, S.nbeads), S.nparticles, S.nbeads) 
         new(r,list,list)
     end
+end
+
+function Base.show(io::IO, p::Path)
+    print(io, "Path $(p.r) \n Next $(p.next) \n Prev $(p.prev)")
 end
 
