@@ -2,6 +2,8 @@ using Halcyon
 
 using Test
 
+include("potentials.jl")
+
 @assert 1==1
 
 const T=300

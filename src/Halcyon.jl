@@ -11,5 +11,7 @@ include("types.jl")
 include("potentials.jl") 
 include("PIMC.jl") # Path integrals for the win
 
+export Harmonic, DoubleWell, LennardJones, Coulomb, Yukawa
+
 end # module
 
