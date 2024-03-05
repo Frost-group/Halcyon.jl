@@ -10,7 +10,7 @@ struct System
     β ::Float64
 
 
-    function System(nbeads::Integer, nparticles::Integer; mass=1.0, spatialdimensions=3, β=1.0)
+    function System(nbeads::Integer, nparticles::Integer; mass=1.0, spatialdimensions=3, β=100.0)
         new(nparticles, nbeads, mass, spatialdimensions, β)
     end
 end

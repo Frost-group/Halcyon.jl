@@ -4,15 +4,15 @@ using Test
 
 include("potentials.jl")
 
-@assert 1==1
-
-const T=300
-const tau=0.5
-nbeads=round(Int,1/(tau*T)) # ??? 
-
-nbeads=4
-nparticles=2
-spatialdimensions=1
-
-Halcyon.Path(nbeads, nparticles,  spatialdimensions=spatialdimensions)
+@testset "Integration tests - MC" begin
+    system=Halcyon.System(5,5)
+    path=Halcyon.Path(system)
+    
+    Halcyon.localMove!(system,path,verbose=true)
+    @time Halcyon.localMove!(system,path)
+    println("Now 1_000_000 moves...")
+    @time for i in 1:1_000_000 Halcyon.localMove!(system,path) end
+    Halcyon.localMove!(system,path,verbose=true)
+    println("Rattle rattle... should be lower in energy.")
+end
 

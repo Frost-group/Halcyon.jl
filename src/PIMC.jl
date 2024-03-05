@@ -16,29 +16,34 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
-function localMove!(sys,path)
+function localMove!(sys,path; verbose=false)
     particle=rand(1:sys.nparticles)
     bead=rand(1:sys.nbeads)
     Δ=randn(sys.spatialdimensions)
 
-    pold=path.r[particle,bead,:]
+    @inbounds begin
+    pold=@view path.r[particle,bead,:]
     pnew=pold+Δ
 
-    Sold=Harmonic(pold)+
-            (sum(pold.-path.r[path.prev[particle,bead],mod1(bead-1,sys.nbeads),:])).^2
-            + (sum(pold.-path.r[path.next[particle,bead],mod1(bead+1,sys.nbeads),:])).^2
+    
+    Sold = Harmonic(pold) +
+        sum(abs2, (pold .- @view path.r[path.prev[particle, bead], mod1(bead - 1, sys.nbeads), :])) +
+        sum(abs2, (pold .- @view path.r[path.next[particle, bead], mod1(bead + 1, sys.nbeads), :]))
 
-    Snew=Harmonic(pnew)+
-    (sum(pnew.-path.r[path.prev[particle,bead],mod1(bead-1,sys.nbeads),:])).^2
-    + (sum(pnew.-path.r[path.next[particle,bead],mod1(bead+1,sys.nbeads),:])).^2
+    Snew = Harmonic(pnew) +
+        sum(abs2, (pnew .- @view path.r[path.prev[particle, bead], mod1(bead - 1, sys.nbeads), :])) +
+        sum(abs2, (pnew .- @view path.r[path.next[particle, bead], mod1(bead + 1, sys.nbeads), :]))
+    end
 
     ΔS=Snew-Sold
     
-    println("localMove! particle=$particle bead=$bead Δ=$Δ pold=$pold pnew=$pnew Sold=$Sold Snew=$Snew ΔS=$ΔS")
+    if verbose
+        println("localMove! particle=$particle bead=$bead Δ=$Δ pold=$pold pnew=$pnew Sold=$Sold Snew=$Snew ΔS=$ΔS")
+    end
 
     if ΔS ≤ 0 || rand() < exp(-sys.β * ΔS)
-        println("Accept!")
-        path.r[particle,bead,:]=pnew
+        if verbose println("Accept!") end
+        @inbounds path.r[particle,bead,:]=pnew
     end
 end
 
