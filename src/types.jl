@@ -7,9 +7,11 @@ struct System
     nparticles ::Int64
     mass ::Float64
     spatialdimensions ::Int64
+    β ::Float64
 
-    function System(nbeads::Integer, nparticles::Integer; mass=1.0, spatialdimensions=3)
-        new(nparticles, nbeads, mass, spatialdimensions)
+
+    function System(nbeads::Integer, nparticles::Integer; mass=1.0, spatialdimensions=3, β=1.0)
+        new(nparticles, nbeads, mass, spatialdimensions, β)
     end
 end
 Base.show(io::IO, s::System) = print(io, "PIMC system with $(s.nbeads) beads and $(s.nparticles) particles. \nParticle mass of $(s.mass). $(s.spatialdimensions) spatial dimensions.")

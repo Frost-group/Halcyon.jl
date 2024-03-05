@@ -16,7 +16,7 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
-function localMove(sys,path)
+function localMove!(sys,path)
     particle=rand(1:sys.nparticles)
     bead=rand(1:sys.nbeads)
     Δ=randn(sys.spatialdimensions)
@@ -32,7 +32,14 @@ function localMove(sys,path)
     (sum(pnew.-path.r[path.prev[particle,bead],mod1(bead-1,sys.nbeads),:])).^2
     + (sum(pnew.-path.r[path.next[particle,bead],mod1(bead+1,sys.nbeads),:])).^2
 
-    println("localMove particle: $particle bead: $bead Δ $Δ pold $pold pnew $pnew Sold $Sold Snew $Snew")
+    ΔS=Snew-Sold
+    
+    println("localMove! particle=$particle bead=$bead Δ=$Δ pold=$pold pnew=$pnew Sold=$Sold Snew=$Snew ΔS=$ΔS")
+
+    if ΔS ≤ 0 || rand() < exp(-sys.β * ΔS)
+        println("Accept!")
+        path.r[particle,bead,:]=pnew
+    end
 end
 
 
