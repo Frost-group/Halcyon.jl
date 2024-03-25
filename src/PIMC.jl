@@ -16,14 +16,17 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
-function localMove!(system,path; moves=1, verbose=false)
+function localMove!(system,path; moves=1, verbose=false, stepsize=0.1)
+    ACCEPT=0
+    REJECT=0
+
     for m in 1:moves # this loop brought within the function
         # I don't understand why, but otherwise you get a lot of allocations (12!) from
         # dereferencing system.potential for every run of the function. 
 
     particle=rand(1:system.nparticles)
     bead=rand(1:system.nbeads)
-    Δ=randn(system.spatialdimensions)
+    Δ=stepsize*randn(system.spatialdimensions)
 
     @inbounds begin
     pold=@view path.r[particle,bead,:]
@@ -47,9 +50,15 @@ function localMove!(system,path; moves=1, verbose=false)
 
     if ΔS ≤ 0 || rand() < exp(-system.β * ΔS)
         if verbose println("Accept!") end
+        ACCEPT+=1
         @inbounds path.r[particle,bead,:]=pnew
+    else 
+        REJECT+=1
     end
+
     end
+
+    println("Moves: $moves Accept: $ACCEPT Reject: $REJECT Ratio: $(ACCEPT/moves)")
 end
 
 
