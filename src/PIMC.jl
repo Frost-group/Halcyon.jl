@@ -17,7 +17,7 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
-function localMove!(system,path; moves=1, verbose=false, stepsize=0.1)
+function localMove!(sys,path; moves=1, verbose=false, stepsize=0.1)
     ACCEPT=0
     REJECT=0
 
@@ -26,34 +26,34 @@ function localMove!(system,path; moves=1, verbose=false, stepsize=0.1)
         # dereferencing system.potential for every run of the function. 
 
         # pick random particle, random bead, attempted 'simple' move
-        particle=rand(1:system.nparticles)
-        bead=rand(1:system.nbeads)
-        Δ=stepsize*randn(system.spatialdimensions)
+        p=rand(1:sys.nparticles) # (p)article
+        b=rand(1:sys.nbeads)     # (b)ead
+        Δ=stepsize*randn(sys.spatialdimensions)
 
         @inbounds begin
-        pold=@view path.r[particle,bead,:]
+        pold=@view path.r[p,b,:]
         pnew=pold+Δ
         
         Sold = Harmonic(pold) +
-        sum(abs2, (pold .- @view path.r[path.prev[particle, bead], mod1(bead - 1, system.nbeads), :])) +
-            sum(abs2, (pold .- @view path.r[path.next[particle, bead], mod1(bead + 1, system.nbeads), :]))
+            sum(abs2, (pold .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
+            sum(abs2, (pold .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
 
         Snew = Harmonic(pnew) +
-            sum(abs2, (pnew .- @view path.r[path.prev[particle, bead], mod1(bead - 1, system.nbeads), :])) +
-            sum(abs2, (pnew .- @view path.r[path.next[particle, bead], mod1(bead + 1, system.nbeads), :]))
+            sum(abs2, (pnew .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
+            sum(abs2, (pnew .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
         end
 
     ΔS=Snew-Sold
     
     if verbose
-        println("localMove! particle=$particle bead=$bead Δ=$Δ pold=$pold pnew=$pnew Sold=$Sold Snew=$Snew ΔS=$ΔS")
+        println("localMove! particle=$p bead=$b Δ=$Δ pold=$pold pnew=$pnew Sold=$Sold Snew=$Snew ΔS=$ΔS")
     end
 
     # Metropolis critereon
-    if ΔS ≤ 0 || rand() < exp(-system.β * ΔS)
+    if ΔS ≤ 0 || rand() < exp(-sys.β * ΔS)
         if verbose println("Accept!") end
         ACCEPT+=1
-        @inbounds path.r[particle,bead,:]=pnew
+        @inbounds path.r[p,b,:]=pnew
     else 
         REJECT+=1
     end
