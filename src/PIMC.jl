@@ -17,7 +17,7 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
-function localMove!(sys,path; moves=1, verbose=false, stepsize=0.1)
+function localMove!(sys,path; moves=1, verbose=false, stepsize=0.1, V=Harmonic, U=Coulomb)
     ACCEPT=0
     REJECT=0
 
@@ -30,17 +30,24 @@ function localMove!(sys,path; moves=1, verbose=false, stepsize=0.1)
         b=rand(1:sys.nbeads)     # (b)ead
         Δ=stepsize*randn(sys.spatialdimensions)
 
-        @inbounds begin
+        @inbounds begin # hold my beer
         pold=@view path.r[p,b,:]
         pnew=pold+Δ
         
-        Sold = Harmonic(pold) +
-            sum(abs2, (pold .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
+# reinterpret(SVector{3, Float64}, from 
+# https://discourse.julialang.org/t/broadcasting-across-columns-of-a-matrix/18496/3?u=jarvist
+
+        Sold = 
+        V(pold) +
+        sum(U.(reinterpret(SVector{3, Float64}, (pold' .- @view path.r[p,:,:])'))) +
+        sum(abs2, (pold .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
             sum(abs2, (pold .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
 
-        Snew = Harmonic(pnew) +
-            sum(abs2, (pnew .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
-            sum(abs2, (pnew .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
+        Snew = 
+        V(pnew) +
+        sum(U.(reinterpret(SVector{3, Float64}, (pnew' .- @view path.r[p,:,:])'))) +            
+        sum(abs2, (pnew .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
+        sum(abs2, (pnew .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
         end
 
     ΔS=Snew-Sold

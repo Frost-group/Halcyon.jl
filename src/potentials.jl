@@ -34,6 +34,7 @@ Strength g. (Same as Yukawa.)
 """
 function Coulomb(r::AbstractVector{<:Real}; g=1.0)
     r′ = norm(r)
+    if r′==0.0 return 0.0 end # hack for avoiding infinite self energy 
     return -g / r′
 end
 
