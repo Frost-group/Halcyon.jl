@@ -9,12 +9,25 @@ struct System
     spatialdimensions ::Int64
     β ::Float64
     potential ::Function
+    λ ::Float64 
+    τ ::Float64   # imaginary time step
+    
 
-    function System(nbeads::Integer, nparticles::Integer; mass=1.0, spatialdimensions=3, β=100.0, potential=Harmonic)
-        new(nparticles, nbeads, mass, spatialdimensions, β, potential)
+    function System(nbeads::Integer, nparticles::Integer; 
+                   mass=1.0, 
+                   spatialdimensions=3, 
+                   β=100.0, 
+                   potential=Harmonic,
+                   λ=1.0,  # default thermal wavelength
+                   τ=β/nbeads)  # default imaginary time step
+        new(nparticles, nbeads, mass, spatialdimensions, β, potential, λ, τ)
     end
 end
-Base.show(io::IO, s::System) = print(io, "PIMC system with $(s.nbeads) beads and $(s.nparticles) particles. \nβ=$(s.β). Potential=$(s.potential)\nParticle mass of $(s.mass). $(s.spatialdimensions) spatial dimensions." )
+
+Base.show(io::IO, s::System) = print(io, 
+    "PIMC system with $(s.nbeads) beads and $(s.nparticles) particles. \n" *
+    "β=$(s.β), τ=$(s.τ). Potential=$(s.potential)\n" *
+    "Particle mass of $(s.mass), λ=$(s.λ). $(s.spatialdimensions) spatial dimensions.")
 
 # Central path structure
 # Contains a ~linked list with next and prev; to allow for sampled particle exchange

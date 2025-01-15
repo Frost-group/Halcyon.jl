@@ -17,6 +17,45 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
+function total_energy(sys, path; V=Harmonic, U=Coulomb, return_components=false)
+    # Initialize energy components
+    kinetic = 0.0
+    potential = 0.0
+    
+    # Constants
+    τ = sys.β / sys.nbeads
+    ω=ℏ=1 # fudge
+    
+    
+    # Loop over all particles and beads
+    for p in 1:sys.nparticles
+        for b in 1:sys.nbeads
+            next_b = mod1(b+1, sys.nbeads)
+            
+            @inbounds begin
+                # Get current and next slice
+                sA = @view path.r[p,b,:]
+                sB = @view path.r[p,next_b,:]
+
+                # Spring term for kinetic energy
+                Δr² = sum(abs2, sA .- sB)
+                kinetic += sys.mass / (2τ * ℏ^2) * Δr²
+                
+                # External harmonic potential
+                potential += 0.5 * sys.mass * ω^2 * sum(abs2, sA)
+            end
+        end
+    end
+    
+    # Scale factors
+    kinetic = sys.nparticles / (2.0 * sys.β) * (sys.nbeads - 1/sys.nbeads)
+    potential /= sys.nbeads  # Average over beads
+    
+    total = kinetic + potential
+    
+    return return_components ? (kinetic=kinetic, potential=potential, total=total) : total
+end
+
 function localMove!(sys,path; moves=1, verbose=false, stepsize=0.1, V=Harmonic, U=Coulomb)
     ACCEPT=0
     REJECT=0
@@ -37,6 +76,7 @@ function localMove!(sys,path; moves=1, verbose=false, stepsize=0.1, V=Harmonic, 
 # reinterpret(SVector{3, Float64}, from 
 # https://discourse.julialang.org/t/broadcasting-across-columns-of-a-matrix/18496/3?u=jarvist
 
+# I was being far too clever for my own good here.
         Sold = 
         V(pold) +
         sum(U.(reinterpret(SVector{3, Float64}, (pold' .- @view path.r[p,:,:])'))) +
@@ -69,5 +109,7 @@ function localMove!(sys,path; moves=1, verbose=false, stepsize=0.1, V=Harmonic, 
 
     println("Moves: $moves Accept: $ACCEPT Reject: $REJECT Ratio: $(ACCEPT/moves)")
 end
+
+
 
 

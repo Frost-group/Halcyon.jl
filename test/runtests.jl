@@ -1,7 +1,11 @@
+println("Starting tests...")
+println("Loading Halcyon...")
 using Halcyon
 
+using BenchmarkTools
 using Test
 
+println("Loading potentials.jl...")
 include("potentials.jl")
 
 @testset "Integration tests - MC" begin
