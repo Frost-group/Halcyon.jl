@@ -17,7 +17,7 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
-function total_energy(sys, path; V=Harmonic, U=Coulomb, return_components=false)
+function total_energy(sys, path; V=Harmonic, U=Coulomb)
     # Initialize energy components
     kinetic = 0.0
     potential = 0.0
@@ -47,16 +47,13 @@ function total_energy(sys, path; V=Harmonic, U=Coulomb, return_components=false)
         end
     end
     
-    # Scale factors
-    kinetic = sys.nparticles / (2.0 * sys.β) * (sys.nbeads - 1/sys.nbeads)
-    potential /= sys.nbeads  # Average over beads
-    
     total = kinetic + potential
+    total /= sys.nbeads
     
-    return return_components ? (kinetic=kinetic, potential=potential, total=total) : total
+    return total
 end
 
-function localMove!(sys,path; moves=1, verbose=false, stepsize=0.1, V=Harmonic, U=Coulomb)
+function localMove!(sys,path; moves=1, verbose=false, stepsize=0.5, V=Harmonic, U=Coulomb)
     ACCEPT=0
     REJECT=0
 
