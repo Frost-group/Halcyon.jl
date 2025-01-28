@@ -40,7 +40,7 @@ mutable struct Path
     prev::Array{Int64}
 
     function Path(S::System)
-        r=rand(S.nparticles,S.nbeads,S.spatialdimensions)
+        r=randn(S.nparticles,S.nbeads,S.spatialdimensions)
         list=reshape(repeat(1:S.nparticles, S.nbeads), S.nparticles, S.nbeads) 
         new(r,list,list)
     end

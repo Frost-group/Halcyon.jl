@@ -12,6 +12,10 @@ function DoubleWell(r::AbstractVector{<:Real}; A=10, B=1)
     return A*(r′^4 - r′^2) - B*r′^2
 end
 
+function NullPotential(r::AbstractVector{<:Real})
+    return 0.0
+end
+
 """
     LennardJones(r::AbstractVector{<:Real}; ϵ=1.0, σ=1.0)
 

@@ -24,84 +24,106 @@ function total_energy(sys, path; V=Harmonic, U=Coulomb)
     
     # Constants
     τ = sys.β / sys.nbeads
-    ω=ℏ=1 # fudge
-    
     
     # Loop over all particles and beads
     for p in 1:sys.nparticles
         for b in 1:sys.nbeads
-            next_b = mod1(b+1, sys.nbeads)
-            
             @inbounds begin
-                # Get current and next slice
+                # Get current bead and neighbors
                 sA = @view path.r[p,b,:]
-                sB = @view path.r[p,next_b,:]
+                prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.nbeads), :]
+                next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.nbeads), :]
 
-                # Spring term for kinetic energy
-                Δr² = sum(abs2, sA .- sB)
-                kinetic += sys.mass / (2τ * ℏ^2) * Δr²
+                # Spring terms with correct factors
+                spring_energy = sum(abs2, τ* (sA .- prev_bead)) + 
+                              sum(abs2, τ* (sA .- next_bead))
+                kinetic += spring_energy / (4τ)
                 
-                # External harmonic potential
-                potential += 0.5 * sys.mass * ω^2 * sum(abs2, sA)
+                # External potential (factor of 2 (!?) as in Thijssen)
+                potential += 2.0 * V(sA)
+                
+                # Interaction potential if multiple particles
+                if sys.nparticles > 1
+                    potential += sum(U.(reinterpret(SVector{3,Float64}, (sA' .- @view path.r[p,:,:])')))
+                end
             end
         end
     end
     
-    total = kinetic + potential
-    total /= sys.nbeads
+    # Average over beads, and particles, for comparison with QHO answer
+    total = (kinetic + potential) / ( sys.nbeads * sys.nparticles )
     
     return total
 end
 
-function localMove!(sys,path; moves=1, verbose=false, stepsize=0.5, V=Harmonic, U=Coulomb)
-    ACCEPT=0
-    REJECT=0
+function localMove!(sys, path; moves=1, verbose=false, stepsize=0.2, V=Harmonic, U=NullPotential)
+    ACCEPT = 0
+    REJECT = 0
+    τ = sys.β / sys.nbeads
 
     for m in 1:moves # this loop brought within the function
         # I don't understand why, but otherwise you get a lot of allocations (12?!) from
-        # dereferencing system.potential for every run of the function. 
-
-        # pick random particle, random bead, attempted 'simple' move
-        p=rand(1:sys.nparticles) # (p)article
-        b=rand(1:sys.nbeads)     # (b)ead
-        Δ=stepsize*randn(sys.spatialdimensions)
-
-        @inbounds begin # hold my beer
-        pold=@view path.r[p,b,:]
-        pnew=pold+Δ
+        # dereferencing system.potential for every run of the function.
         
+        p = rand(1:sys.nparticles) # (p)article
+        b = rand(1:sys.nbeads)     # (b)ead
+        Δ = stepsize * randn(sys.spatialdimensions)
 # reinterpret(SVector{3, Float64}, from 
 # https://discourse.julialang.org/t/broadcasting-across-columns-of-a-matrix/18496/3?u=jarvist
 
 # I was being far too clever for my own good here.
-        Sold = 
-        V(pold) +
-        sum(U.(reinterpret(SVector{3, Float64}, (pold' .- @view path.r[p,:,:])'))) +
-        sum(abs2, (pold .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
-            sum(abs2, (pold .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
+#        Sold = 
+#        V(pold) +
+#        sum(U.(reinterpret(SVector{3, Float64}, (pold' .- @view path.r[p,:,:])'))) +
+#        sum(abs2, (pold .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
+#            sum(abs2, (pold .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
 
-        Snew = 
-        V(pnew) +
-        sum(U.(reinterpret(SVector{3, Float64}, (pnew' .- @view path.r[p,:,:])'))) +            
-        sum(abs2, (pnew .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
-        sum(abs2, (pnew .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
+#        Snew = 
+#        V(pnew) +
+#        sum(U.(reinterpret(SVector{3, Float64}, (pnew' .- @view path.r[p,:,:])'))) +            
+#        sum(abs2, (pnew .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
+#        sum(abs2, (pnew .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
+
+
+        @inbounds begin
+            r_old = @view path.r[p,b,:]
+            r_new = r_old + Δ
+            
+            # Get neighboring beads
+            prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.nbeads), :]
+            next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.nbeads), :]
+
+            # Calculate spring terms with correct factors
+            Sold = sum(abs2, τ* (r_old .- prev_bead)) + 
+                  sum(abs2, τ* (r_old .- next_bead))
+            Snew = sum(abs2, τ* (r_new .- prev_bead)) + 
+                  sum(abs2, τ* (r_new .- next_bead))
+
+            # Add potential terms
+            Sold += 2τ * V(r_old)
+            Snew += 2τ * V(r_new)
+
+            # Add interaction terms if multiple particles
+            if sys.nparticles > 1
+                Sold += τ * sum(U.(reinterpret(SVector{3,Float64}, (r_old' .- @view path.r[p,:,:])')))
+                Snew += τ * sum(U.(reinterpret(SVector{3,Float64}, (r_new' .- @view path.r[p,:,:])')))
+            end
         end
 
-    ΔS=Snew-Sold
-    
-    if verbose
-        println("localMove! particle=$p bead=$b Δ=$Δ pold=$pold pnew=$pnew Sold=$Sold Snew=$Snew ΔS=$ΔS")
-    end
+        ΔS = 0.5 * (Snew - Sold) # Factor of 1/2 from primitive approximation
 
-    # Metropolis critereon
-    if ΔS ≤ 0 || rand() < exp(-sys.β * ΔS)
-        if verbose println("Accept!") end
-        ACCEPT+=1
-        @inbounds path.r[p,b,:]=pnew
-    else 
-        REJECT+=1
-    end
+        if verbose
+            println("localMove! p=$p b=$b Δ=$Δ r_old=$r_old r_new=$r_new Sold=$Sold Snew=$Snew ΔS=$ΔS")
+        end
 
+        # Metropolis critereon
+        if ΔS ≤ 0 || rand() < exp(-sys.β * ΔS)
+            if verbose println("Accept!") end
+            ACCEPT+=1
+            @inbounds path.r[p,b,:]=r_new
+        else 
+            REJECT+=1
+        end
     end
 
     println("Moves: $moves Accept: $ACCEPT Reject: $REJECT Ratio: $(ACCEPT/moves)")
