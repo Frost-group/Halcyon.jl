@@ -6,12 +6,14 @@ struct System
     nbeads ::Int64
     nparticles ::Int64
     mass ::Float64
+    
     spatialdimensions ::Int64
     β ::Float64
     potential ::Function
     λ ::Float64 
     τ ::Float64   # imaginary time step
-    
+   
+    L ::Float64 # box length; yes, this is definitely going to come back and bite me. Assumes square / cubic box for now.
 
     function System(nbeads::Integer, nparticles::Integer; 
                    mass=1.0, 
@@ -19,15 +21,17 @@ struct System
                    β=100.0, 
                    potential=Harmonic,
                    λ=1.0,  # default thermal wavelength
-                   τ=β/nbeads)  # default imaginary time step
-        new(nparticles, nbeads, mass, spatialdimensions, β, potential, λ, τ)
+                   τ=β/nbeads,
+                   L=1.0)  # default imaginary time step
+        new(nparticles, nbeads, mass, spatialdimensions, β, potential, λ, τ, L)
     end
 end
 
 Base.show(io::IO, s::System) = print(io, 
     "PIMC system with $(s.nbeads) beads and $(s.nparticles) particles. \n" *
     "β=$(s.β), τ=$(s.τ). Potential=$(s.potential)\n" *
-    "Particle mass of $(s.mass), λ=$(s.λ). $(s.spatialdimensions) spatial dimensions.")
+    "Particle mass of $(s.mass), λ=$(s.λ). $(s.spatialdimensions) spatial dimensions." * 
+    "Box length $(s.L).")
 
 # Central path structure
 # Contains a ~linked list with next and prev; to allow for sampled particle exchange

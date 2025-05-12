@@ -10,8 +10,10 @@ include("potentials.jl")
 
 @testset "Integration tests - MC" begin
     system=Halcyon.System(5,5)
+    @show system
     path=Halcyon.Path(system)
-    
+    @show path
+
     Halcyon.localMove!(system,path,verbose=true)
     @time Halcyon.localMove!(system,path)
     println("Now 1_000_000 moves...")
