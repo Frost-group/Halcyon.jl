@@ -77,7 +77,7 @@ end
 action_gradient(r::Vector{Float64}, s::State, i::Int, j::Int) = gradient(r -> action(r,s,i,j))
 
 # ╔═╡ 8654b316-cf71-45d1-b2fd-9ceded5d2a5d
-function centreofmass_update!(s::State)
+function centreofm_update!(s::State)
 	p=s.params
 	i=rand(1:p.Ne)
 
@@ -96,7 +96,7 @@ end
 let
 	ptest = Params(Ne=2, Nt=100, β=1.0, ω=1.0, Δ=0.1, rₙ=1.0, rₑ=1.0)
 	stest = State(ptest)
-	centreofmass_update!(stest)
+	centreofm_update!(stest)
 end
 
 # ╔═╡ f749dd08-0f8c-423a-9c4a-79119ae5358d
@@ -181,7 +181,7 @@ function run_simulation(p::Params, moves::Dict{Function, Float64}, n_steps::Int,
     E_avg = energy(s)
 	traj=[]
     for t in 1:n_steps
-        sample([centreofmass_update!, metropolis_update!, bisection_update!], Weights([moves[centreofmass_update!], moves[metropolis_update!], moves[bisection_update!]]))(s)
+        sample([centreofm_update!, metropolis_update!, bisection_update!], Weights([moves[centreofm_update!], moves[metropolis_update!], moves[bisection_update!]]))(s)
         if t % stride == 0
             E_avg = (E_avg * (t / stride - 1) + energy(s)) / (t / stride)
 			append!(traj, [s.path])
@@ -222,7 +222,7 @@ end
 begin
 	p = Params(Ne=1, Nt=10, β=1, ω=1.0, Δ=0.01, rₙ=1.0, rₑ=1.0)
 	#moves = Dict(metropolis_update! => 0.5, bisection_update! => 0.5)
-	moves = Dict(centreofmass_update! => 0.1, metropolis_update! => 1.0, bisection_update! => 0.0)
+	moves = Dict(centreofm_update! => 0.1, metropolis_update! => 1.0, bisection_update! => 0.0)
 	n_steps = 1_000_000
 	stride = n_steps ÷ 1000
 	

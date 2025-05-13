@@ -6,11 +6,11 @@ using StatsBase
 
 # Simulation parameters
 const β = 1.0        # Inverse temperature
-const nbeads = 1    # Number of beads (M in Thijsesen - is this standard?)
-const nparticles = 100  # Number of particles
+const M = 1    # Number of beads (M in Thijsesen - is this standard?)
+const N = 100  # Number of particles
 const ω = 1.0         # Harmonic trap frequency
 const ℏ = 1.0         # Planck constant
-const m = 1.0         # Particle mass
+const m = 1.0         # Particle m
 const EQUILIBRATION_STEPS = 10_000_000    # ... Thijssen, First 2000 steps discarded
 const MEASUREMENT_STEPS = 10_000        # Steps between measurements
 const MEASUREMENTS = 280 #             # ... Thijssen, 28000 post-equilibration steps
@@ -24,13 +24,13 @@ qho_finite_temp_density(x::AbstractFloat, ω::AbstractFloat, β::AbstractFloat) 
 # Initialize system with correct parameters
 println("Initializing quantum particle in harmonic trap...")
 system = Halcyon.System(
-    nbeads, 
-    nparticles, 
-    mass=m,
+    M, 
+    N, 
+    m=m,
     β=β,
     potential=Halcyon.Harmonic,
     λ=ℏ^2/(2m),
-    τ=β/nbeads
+    τ=β/M
 )
 path = Halcyon.Path(system)
 
@@ -39,7 +39,7 @@ println("Equilibrating for $EQUILIBRATION_STEPS steps...")
 @time Halcyon.localMove!(system, path, moves=EQUILIBRATION_STEPS, stepsize=1.0, verbose=false)
 
 # push path up hill..
-path.r += rand(system.nparticles, system.nbeads, system.spatialdimensions)
+path.r += rand(system.N, system.M, system.D)
 
 # Data collection
 println("Collecting measurements for $MEASUREMENT_STEPS steps...")
@@ -48,7 +48,7 @@ energies = zeros(MEASUREMENTS)
 
 @time for i in 1:MEASUREMENTS
     Halcyon.localMove!(system, path, moves=MEASUREMENT_STEPS, stepsize=1.0)
-    positions[i] = mean(path.r)  # Center of mass
+    positions[i] = mean(path.r)  # Center of m
     energies[i] = Halcyon.total_energy(system, path)
 end
 

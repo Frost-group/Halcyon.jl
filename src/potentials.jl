@@ -53,7 +53,7 @@ The Yukawa potential is given by:
 
 where:
 - g is the strength of the potential
-- m is the screening mass or inverse screening length
+- m is the screening m or inverse screening length
 - r is the distance between the particles
 """
 function Yukawa(r::AbstractVector{<:Real}; g=1.0, m=1.0)

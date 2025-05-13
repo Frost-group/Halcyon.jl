@@ -23,16 +23,16 @@ function total_energy(sys, path; V=Harmonic, U=Coulomb)
     potential = 0.0
     
     # Constants
-    τ = sys.β / sys.nbeads
+    τ = sys.β / sys.M
     
     # Loop over all particles and beads
-    for p in 1:sys.nparticles
-        for b in 1:sys.nbeads
+    for p in 1:sys.N
+        for b in 1:sys.M
             @inbounds begin
                 # Get current bead and neighbors
                 sA = @view path.r[p,b,:]
-                prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.nbeads), :]
-                next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.nbeads), :]
+                prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.M), :]
+                next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.M), :]
 
                 # Spring terms with correct factors
                 spring_energy = sum(abs2, τ* (sA .- prev_bead)) + 
@@ -43,7 +43,7 @@ function total_energy(sys, path; V=Harmonic, U=Coulomb)
                 potential += 2.0 * V(sA)
                 
                 # Interaction potential if multiple particles
-                if sys.nparticles > 1
+                if sys.N > 1
                     potential += sum(U.(reinterpret(SVector{3,Float64}, (sA' .- @view path.r[p,:,:])')))
                 end
             end
@@ -51,7 +51,7 @@ function total_energy(sys, path; V=Harmonic, U=Coulomb)
     end
     
     # Average over beads, and particles, for comparison with QHO answer
-    total = (kinetic + potential) / ( sys.nbeads * sys.nparticles )
+    total = (kinetic + potential) / ( sys.M * sys.N )
     
     return total
 end
@@ -59,15 +59,15 @@ end
 function localMove!(sys, path; moves=1, verbose=false, stepsize=0.2, V=Harmonic, U=NullPotential)
     ACCEPT = 0
     REJECT = 0
-    τ = sys.β / sys.nbeads
+    τ = sys.β / sys.M
 
     for m in 1:moves # this loop brought within the function
         # I don't understand why, but otherwise you get a lot of allocations (12?!) from
         # dereferencing system.potential for every run of the function.
         
-        p = rand(1:sys.nparticles) # (p)article
-        b = rand(1:sys.nbeads)     # (b)ead
-        Δ = stepsize * randn(sys.spatialdimensions)
+        p = rand(1:sys.N) # (p)article
+        b = rand(1:sys.M)     # (b)ead
+        Δ = stepsize * randn(sys.D)
 # reinterpret(SVector{3, Float64}, from 
 # https://discourse.julialang.org/t/broadcasting-across-columns-of-a-matrix/18496/3?u=jarvist
 
@@ -75,14 +75,14 @@ function localMove!(sys, path; moves=1, verbose=false, stepsize=0.2, V=Harmonic,
 #        Sold = 
 #        V(pold) +
 #        sum(U.(reinterpret(SVector{3, Float64}, (pold' .- @view path.r[p,:,:])'))) +
-#        sum(abs2, (pold .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
-#            sum(abs2, (pold .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
+#        sum(abs2, (pold .- @view path.r[path.prev[p, b], mod1(b- 1, sys.M), :])) +
+#            sum(abs2, (pold .- @view path.r[path.next[p, b], mod1(b+ 1, sys.M), :]))
 
 #        Snew = 
 #        V(pnew) +
 #        sum(U.(reinterpret(SVector{3, Float64}, (pnew' .- @view path.r[p,:,:])'))) +            
-#        sum(abs2, (pnew .- @view path.r[path.prev[p, b], mod1(b- 1, sys.nbeads), :])) +
-#        sum(abs2, (pnew .- @view path.r[path.next[p, b], mod1(b+ 1, sys.nbeads), :]))
+#        sum(abs2, (pnew .- @view path.r[path.prev[p, b], mod1(b- 1, sys.M), :])) +
+#        sum(abs2, (pnew .- @view path.r[path.next[p, b], mod1(b+ 1, sys.M), :]))
 
 
         @inbounds begin
@@ -90,8 +90,8 @@ function localMove!(sys, path; moves=1, verbose=false, stepsize=0.2, V=Harmonic,
             r_new = r_old + Δ
             
             # Get neighboring beads
-            prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.nbeads), :]
-            next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.nbeads), :]
+            prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.M), :]
+            next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.M), :]
 
             # Calculate spring terms with correct factors
             Sold = sum(abs2, τ* (r_old .- prev_bead)) + 
@@ -104,7 +104,7 @@ function localMove!(sys, path; moves=1, verbose=false, stepsize=0.2, V=Harmonic,
             Snew += 2τ * V(r_new)
 
             # Add interaction terms if multiple particles
-            if sys.nparticles > 1
+            if sys.N > 1
                 Sold += τ * sum(U.(reinterpret(SVector{3,Float64}, (r_old' .- @view path.r[p,:,:])')))
                 Snew += τ * sum(U.(reinterpret(SVector{3,Float64}, (r_new' .- @view path.r[p,:,:])')))
             end

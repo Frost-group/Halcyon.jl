@@ -19,7 +19,7 @@ begin
 	const β = 1.0     # inverse temperature
 	const L = 1.0     # length of the box
 	const N = 10      # number of particles
-	const m = 1.0     # particle mass
+	const m = 1.0     # particle m
 	const q = 1.0     # particle charge
 	const ε0 = 1.0    # vacuum permittivity
 	const e2 = q^2 / (4π * ε0)  # Coulomb constant
