@@ -29,15 +29,14 @@ function total_energy(sys, path; V=Harmonic, U=Coulomb)
     for p in 1:sys.N
         for b in 1:sys.M
             @inbounds begin
-                # Get current bead and neighbors
+                # Get current bead and next/previous beads
                 sA = @view path.r[p,b,:]
                 prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.M), :]
                 next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.M), :]
 
                 # Spring terms with correct factors
-                spring_energy = sum(abs2, τ* (sA .- prev_bead)) + 
-                              sum(abs2, τ* (sA .- next_bead))
-                kinetic += spring_energy / (4τ)
+                kinetic  += ( sum(abs2, (sA .- prev_bead)) + 
+                              sum(abs2, (sA .- next_bead)) ) / 4τ
                 
                 # External potential (factor of 2 (!?) as in Thijssen)
                 potential += 2.0 * V(sA)
@@ -56,7 +55,9 @@ function total_energy(sys, path; V=Harmonic, U=Coulomb)
     return total
 end
 
-function localMove!(sys, path; moves=1, verbose=false, stepsize=0.2, V=Harmonic, U=NullPotential)
+#### Local moves ####
+
+function localMove!(sys, path; moves=1, verbose=false, stepsize=0.4, V=Harmonic, U=NullPotential)
     ACCEPT = 0
     REJECT = 0
     τ = sys.β / sys.M
@@ -68,22 +69,6 @@ function localMove!(sys, path; moves=1, verbose=false, stepsize=0.2, V=Harmonic,
         p = rand(1:sys.N) # (p)article
         b = rand(1:sys.M)     # (b)ead
         Δ = stepsize * randn(sys.D)
-# reinterpret(SVector{3, Float64}, from 
-# https://discourse.julialang.org/t/broadcasting-across-columns-of-a-matrix/18496/3?u=jarvist
-
-# I was being far too clever for my own good here.
-#        Sold = 
-#        V(pold) +
-#        sum(U.(reinterpret(SVector{3, Float64}, (pold' .- @view path.r[p,:,:])'))) +
-#        sum(abs2, (pold .- @view path.r[path.prev[p, b], mod1(b- 1, sys.M), :])) +
-#            sum(abs2, (pold .- @view path.r[path.next[p, b], mod1(b+ 1, sys.M), :]))
-
-#        Snew = 
-#        V(pnew) +
-#        sum(U.(reinterpret(SVector{3, Float64}, (pnew' .- @view path.r[p,:,:])'))) +            
-#        sum(abs2, (pnew .- @view path.r[path.prev[p, b], mod1(b- 1, sys.M), :])) +
-#        sum(abs2, (pnew .- @view path.r[path.next[p, b], mod1(b+ 1, sys.M), :]))
-
 
         @inbounds begin
             r_old = @view path.r[p,b,:]
@@ -99,11 +84,11 @@ function localMove!(sys, path; moves=1, verbose=false, stepsize=0.2, V=Harmonic,
             Snew = sum(abs2, τ* (r_new .- prev_bead)) + 
                   sum(abs2, τ* (r_new .- next_bead))
 
-            # Add potential terms
+            # Add (single body) potential terms
             Sold += 2τ * V(r_old)
             Snew += 2τ * V(r_new)
 
-            # Add interaction terms if multiple particles
+            # Add interaction (two-body potential) terms if multiple particles
             if sys.N > 1
                 Sold += τ * sum(U.(reinterpret(SVector{3,Float64}, (r_old' .- @view path.r[p,:,:])')))
                 Snew += τ * sum(U.(reinterpret(SVector{3,Float64}, (r_new' .- @view path.r[p,:,:])')))
@@ -136,7 +121,7 @@ end
 
 
 
-
+#### G-sector (Matsubara frequencies) moves ####
 
 
 

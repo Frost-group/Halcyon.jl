@@ -36,7 +36,7 @@ path = Halcyon.Path(system)
 
 # Equilibration
 println("Equilibrating for $EQUILIBRATION_STEPS steps...")
-@time Halcyon.localMove!(system, path, moves=EQUILIBRATION_STEPS, stepsize=1.0, verbose=false)
+@time Halcyon.localMove!(system, path, moves=EQUILIBRATION_STEPS, stepsize=4.0, verbose=false)
 
 # push path up hill..
 path.r += rand(system.N, system.M, system.D)
@@ -47,7 +47,7 @@ positions = zeros(MEASUREMENTS)
 energies = zeros(MEASUREMENTS)
 
 @time for i in 1:MEASUREMENTS
-    Halcyon.localMove!(system, path, moves=MEASUREMENT_STEPS, stepsize=1.0)
+    Halcyon.localMove!(system, path, moves=MEASUREMENT_STEPS, stepsize=4.0)
     positions[i] = mean(path.r)  # Center of m
     energies[i] = Halcyon.total_energy(system, path)
 end
