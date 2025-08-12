@@ -34,9 +34,11 @@ using Halcyon
 
         # Exact D-D QHO energy
         E_exact = D * 0.5 * coth(sys.β/2)
+        N=1
+        E_equipartition = D * 0.5 * N / sys.β
 
         println(sys)
-        println("E_primitive = $E_primitive, E_exact = $E_exact")
+        println("E_primitive = $E_primitive, E_exact = $E_exact, E_equipartition = $E_equipartition ")
         @test isapprox(E_primitive, E_exact; rtol=0.05)
     end
 end

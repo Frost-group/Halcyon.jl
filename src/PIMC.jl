@@ -2,59 +2,39 @@
 using ForwardDiff
 # Initial location for all the path integral bits and bobs
 
-# Generic as possible path
+"""
+    total_energy(sys::System, path::Path) -> Float64
 
-# Assumes SliceA, SliceB
-function KineticAction(sA,sB)
-    KE=(sA.r .- sB.r).^2
-    KE=KE/4*Lambda*tau
-    KE
-end
-
-function PotentialAction(sA,sB) #sliceA, sliceB
-    # Primitive action
-    PE=Vext(sA)+Vext(sB) + Vint(sA,sB)
-    PE=PE*0.5*tau
-    PE
-end
-
+Primitive (? is that the correct term) PIMC energy estimator: spring kinetic +
+external one-body + pairwise interactions, averaged over beads.
+"""
 function total_energy(sys::System, path::Path)
-    # Initialize energy components
+    τ, λ, M, N = sys.τ, sys.λ, sys.M, sys.N
     kinetic = 0.0
-    v_ext = 0.0
-    v_pair = 0.0
+    v_ext   = 0.0
+    v_pair  = 0.0
 
-    τ = sys.τ
-    λ = sys.λ
-
-    # Kinetic and external potentials
-    for p in 1:sys.N
-        for b in 1:sys.M
-            @inbounds begin
-                sA = @view path.r[p,b,:]
-                prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.M), :]
-                # Count each spring once using only the prev link
-                kinetic += sum(abs2, (sA .- prev_bead)) / (4λ*τ)
-                v_ext += sys.V(sA)
-            end
+    # Kinetic (springs) and external potential
+    @inbounds for b in 1:M
+        for p in 1:N
+            r  = @view path.r[p, b, :]
+            rp = @view path.r[p, mod1(b - 1, M), :]
+            kinetic += sys.m * sum(abs2, r .- rp) / (4λ * τ)
+            v_ext   += sys.V(r)
         end
-    end
-
-    # Pair interactions counted once per pair per bead
-    if sys.N > 1
-        for b in 1:sys.M
-            @inbounds for p in 1:(sys.N-1)
-                rp = @view path.r[p,b,:]
-                @inbounds for q in (p+1):sys.N
-                    rq = @view path.r[q,b,:]
+        # Pair interactions counted once per pair at bead b
+        if N > 1
+            for p in 1:N-1
+                rp = @view path.r[p, b, :]
+                for q in p+1:N
+                    rq = @view path.r[q, b, :]
                     v_pair += sys.U(rp .- rq)
                 end
             end
         end
     end
 
-    total = (kinetic + v_ext + v_pair) / (sys.M * sys.N)
-    return total
+    return (kinetic + v_ext + v_pair) / M
 end
 
 #### Local moves ####
