@@ -1,24 +1,21 @@
-println("Starting tests...")
-println("Loading Halcyon...")
 using Halcyon
-
 using BenchmarkTools
 using Test
 
-println("Loading potentials.jl...")
 include("potentials.jl")
+include("QHO.jl")
 
 @testset "Integration tests - MC" begin
-    system=Halcyon.System(5,5)
-    @show system
-    path=Halcyon.Path(system)
-    @show path
+    sys = System(5, 5; V=HarmonicPotential(), U=NullPairPotential())
+    path = Path(sys)
 
-    Halcyon.localMove!(system,path,verbose=true)
-    @time Halcyon.localMove!(system,path)
-    println("Now 1_000_000 moves...")
-    @time Halcyon.localMove!(system,path,moves=1_000_000)
-    Halcyon.localMove!(system,path,verbose=true)
-    println("Rattle rattle... should be lower in energy.")
+    # Warmup single move
+    localMove!(sys, path, verbose=true)
+    # Short run
+    localMove!(sys, path)
+    # Long run for performance
+    @time localMove!(sys, path, moves=1_000_000)
+    # A final diagnostic line
+    localMove!(sys, path, verbose=true)
 end
 

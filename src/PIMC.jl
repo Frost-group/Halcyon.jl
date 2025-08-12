@@ -1,4 +1,5 @@
 # PIMC.jl
+using ForwardDiff
 # Initial location for all the path integral bits and bobs
 
 # Generic as possible path
@@ -17,50 +18,52 @@ function PotentialAction(sA,sB) #sliceA, sliceB
     PE
 end
 
-function total_energy(sys, path; V=Harmonic, U=Coulomb)
+function total_energy(sys::System, path::Path)
     # Initialize energy components
     kinetic = 0.0
-    potential = 0.0
-    
-    # Constants
-    τ = sys.β / sys.M
-    
-    # Loop over all particles and beads
+    v_ext = 0.0
+    v_pair = 0.0
+
+    τ = sys.τ
+    λ = sys.λ
+
+    # Kinetic and external potentials
     for p in 1:sys.N
         for b in 1:sys.M
             @inbounds begin
-                # Get current bead and next/previous beads
                 sA = @view path.r[p,b,:]
                 prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.M), :]
-                next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.M), :]
+                # Count each spring once using only the prev link
+                kinetic += sum(abs2, (sA .- prev_bead)) / (4λ*τ)
+                v_ext += sys.V(sA)
+            end
+        end
+    end
 
-                # Spring terms with correct factors
-                kinetic  += ( sum(abs2, (sA .- prev_bead)) + 
-                              sum(abs2, (sA .- next_bead)) ) / 4τ
-                
-                # External potential (factor of 2 (!?) as in Thijssen)
-                potential += 2.0 * V(sA)
-                
-                # Interaction potential if multiple particles
-                if sys.N > 1
-                    potential += sum(U.(reinterpret(SVector{3,Float64}, (sA' .- @view path.r[p,:,:])')))
+    # Pair interactions counted once per pair per bead
+    if sys.N > 1
+        for b in 1:sys.M
+            @inbounds for p in 1:(sys.N-1)
+                rp = @view path.r[p,b,:]
+                @inbounds for q in (p+1):sys.N
+                    rq = @view path.r[q,b,:]
+                    v_pair += sys.U(rp .- rq)
                 end
             end
         end
     end
-    
-    # Average over beads, and particles, for comparison with QHO answer
-    total = (kinetic + potential) / ( sys.M * sys.N )
-    
+
+    total = (kinetic + v_ext + v_pair) / (sys.M * sys.N)
     return total
 end
 
 #### Local moves ####
 
-function localMove!(sys, path; moves=1, verbose=false, stepsize=0.4, V=Harmonic, U=NullPotential)
+function localMove!(sys::System, path::Path; moves::Integer=1, verbose::Bool=false, stepsize::Float64=0.4)
     ACCEPT = 0
     REJECT = 0
-    τ = sys.β / sys.M
+    τ = sys.τ
+    λ = sys.λ
 
     for m in 1:moves # this loop brought within the function
         # I don't understand why, but otherwise you get a lot of allocations (12?!) from
@@ -78,31 +81,35 @@ function localMove!(sys, path; moves=1, verbose=false, stepsize=0.4, V=Harmonic,
             prev_bead = @view path.r[path.prev[p,b], mod1(b-1, sys.M), :]
             next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.M), :]
 
-            # Calculate spring terms with correct factors
-            Sold = sum(abs2, τ* (r_old .- prev_bead)) + 
-                  sum(abs2, τ* (r_old .- next_bead))
-            Snew = sum(abs2, τ* (r_new .- prev_bead)) + 
-                  sum(abs2, τ* (r_new .- next_bead))
+            # Calculate spring terms with correct factors for both adjacent links to bead b
+            Sold = sum(abs2, (r_old .- prev_bead)) / (4λ*τ) +
+                   sum(abs2, (next_bead .- r_old)) / (4λ*τ)
+            Snew = sum(abs2, (r_new .- prev_bead)) / (4λ*τ) +
+                   sum(abs2, (next_bead .- r_new)) / (4λ*τ)
 
             # Add (single body) potential terms
-            Sold += 2τ * V(r_old)
-            Snew += 2τ * V(r_new)
+            Sold += τ * sys.V(r_old)
+            Snew += τ * sys.V(r_new)
 
             # Add interaction (two-body potential) terms if multiple particles
             if sys.N > 1
-                Sold += τ * sum(U.(reinterpret(SVector{3,Float64}, (r_old' .- @view path.r[p,:,:])')))
-                Snew += τ * sum(U.(reinterpret(SVector{3,Float64}, (r_new' .- @view path.r[p,:,:])')))
+                @inbounds for q in 1:sys.N
+                    q == p && continue
+                    rq = @view path.r[q,b,:]
+                    Sold += τ * sys.U(r_old .- rq)
+                    Snew += τ * sys.U(r_new .- rq)
+                end
             end
         end
 
-        ΔS = 0.5 * (Snew - Sold) # Factor of 1/2 from primitive approximation
+        ΔS = (Snew - Sold)
 
         if verbose
             println("localMove! p=$p b=$b Δ=$Δ r_old=$r_old r_new=$r_new Sold=$Sold Snew=$Snew ΔS=$ΔS")
         end
 
-        # Metropolis critereon
-        if ΔS ≤ 0 || rand() < exp(-sys.β * ΔS)
+        # Metropolis criterion for path integral action
+        if ΔS ≤ 0 || rand() < exp(-ΔS)
             if verbose println("Accept!") end
             ACCEPT+=1
             @inbounds path.r[p,b,:]=r_new
