@@ -20,7 +20,7 @@ function total_energy(sys::System, path::Path)
             r  = @view path.r[p, b, :]
             rp = @view path.r[p, mod1(b - 1, M), :]
             kinetic += sys.m * sum(abs2, r .- rp) / (4λ * τ)
-            v_ext   += sys.V(r)
+            v_ext   +=  τ * sys.V(r)
         end
         # Pair interactions counted once per pair at bead b
         if N > 1
@@ -28,12 +28,13 @@ function total_energy(sys::System, path::Path)
                 rp = @view path.r[p, b, :]
                 for q in p+1:N
                     rq = @view path.r[q, b, :]
-                    v_pair += sys.U(rp .- rq)
+                    v_pair += τ * sys.U(rp .- rq)
                 end
             end
         end
     end
 
+    println("total_energy(): kinetic: $kinetic v_ext: $v_ext v_pair: $v_pair")
     return (kinetic + v_ext + v_pair) / M
 end
 
@@ -62,10 +63,10 @@ function localMove!(sys::System, path::Path; moves::Integer=1, verbose::Bool=fal
             next_bead = @view path.r[path.next[p,b], mod1(b+1, sys.M), :]
 
             # Calculate spring terms with correct factors for both adjacent links to bead b
-            Sold = sum(abs2, (r_old .- prev_bead)) / (4λ*τ) +
-                   sum(abs2, (next_bead .- r_old)) / (4λ*τ)
-            Snew = sum(abs2, (r_new .- prev_bead)) / (4λ*τ) +
-                   sum(abs2, (next_bead .- r_new)) / (4λ*τ)
+            Sold = sys.m * (sum(abs2, (r_old .- prev_bead)) / (4λ*τ) +
+                   sum(abs2, (next_bead .- r_old)) / (4λ*τ))
+            Snew = sys.m * (sum(abs2, (r_new .- prev_bead)) / (4λ*τ) +
+                   sum(abs2, (next_bead .- r_new)) / (4λ*τ))
 
             # Add (single body) potential terms
             Sold += τ * sys.V(r_old)
