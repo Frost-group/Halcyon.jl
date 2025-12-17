@@ -56,7 +56,7 @@ function run_benchmarks()
         @btime begin
             $cfg.sector = G_SECTOR
             $cfg.i_head = 1
-            $cfg.i_tail = $cfg.P[$cfg.i_head]
+            $cfg.i_tail = $cfg.next[$cfg.i_head]
             $cfg.r_c_head .= $cfg.r[1, 1, :]
             close!($cfg, $sys, $params)
         end
@@ -66,7 +66,7 @@ function run_benchmarks()
         @btime begin
             $cfg.sector = G_SECTOR
             $cfg.i_head = 1
-            $cfg.i_tail = $cfg.P[$cfg.i_head]
+            $cfg.i_tail = $cfg.next[$cfg.i_head]
             swap!($cfg, $sys, $params)
         end
         
@@ -83,7 +83,7 @@ function run_benchmarks()
         @btime begin
             $cfg.sector = G_SECTOR
             $cfg.i_head = 1
-            $cfg.i_tail = $cfg.P[$cfg.i_head]
+            $cfg.i_tail = $cfg.next[$cfg.i_head]
             move_tail!($cfg, $sys, $params)
         end
         

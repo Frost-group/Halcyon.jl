@@ -21,23 +21,25 @@ Ref: Spada et al. 2022, Section II.C
 Design (Option A): Implicit endpoint representation.
 - Stores beads 0 to M-1 in r[N, M, D].
 - Bead M (the endpoint) is derived from permutation, winding, and bead 0 positions.
-- In Z-sector: endpoint_i = r[P[i], 1, :] + w[i, :] * L
+- In Z-sector: endpoint_i = r[next[i], 1, :] + w[i, :] * L
 - In G-sector: 
     - if i == i_head: endpoint_i = r_c_head + w[i, :] * L
-    - else: endpoint_i = r[P[i], 1, :] + w[i, :] * L
+    - else: endpoint_i = r[next[i], 1, :] + w[i, :] * L
 
 Fields:
 - sector::Sector: Z (diagonal/closed) or G (off-diagonal/worm present)
-- P::Vector{Int}: Permutation vector, P[i] = particle that polymer i connects to
+- next::Vector{Int}: Forward permutation vector, next[i] = particle that polymer i connects to
+- prev::Vector{Int}: Backward permutation vector, prev[j] = particle that connects to polymer j
 - i_head::Int: Particle index of worm head (only meaningful in G-sector)
-- i_tail::Int: Particle index of worm tail = P[i_head] (meaningful in G-sector)
+- i_tail::Int: Particle index of worm tail = next[i_head] (meaningful in G-sector)
 - r_c_head::Vector{Float64}: Compact head coordinate in [0, L)^D
 - r::Array{Float64,3}: Bead positions [particle, bead, dimension], 1:M for beads 0:M-1
 - w::Matrix{Int}: Winding numbers [particle, dimension]
 """
 @kwdef mutable struct WormConfiguration
     sector::Sector = Z_SECTOR
-    P::Vector{Int}
+    next::Vector{Int}
+    prev::Vector{Int}
     i_head::Int = 1
     i_tail::Int = 1
     r_c_head::Vector{Float64} = Float64[]
@@ -72,12 +74,14 @@ function WormConfiguration(sys::System)
     end
     
     # Identity permutation: each polymer closes on itself
-    P = collect(1:N)
+    next = collect(1:N)
+    prev = collect(1:N)
     w = zeros(Int, N, D)
     
     return WormConfiguration(
         sector = Z_SECTOR,
-        P = P,
+        next = next,
+        prev = prev,
         i_head = 1,
         i_tail = 1,
         r_c_head = vec(copy(r[1, 1, :])),
@@ -100,18 +104,34 @@ end
 # ═══════════════════════════════════════════════════════════════════════════════
 
 """
+    get_endpoint(cfg, i, d, L) -> Float64
+
+Return the d-th coordinate of the M-th bead (endpoint) of polymer i.
+Zero-allocation accessor.
+"""
+@inline function get_endpoint(cfg::WormConfiguration, i::Int, d::Int, L::Float64)
+    if cfg.sector == G_SECTOR && i == cfg.i_head
+        return cfg.r_c_head[d] + cfg.w[i, d] * L
+    else
+        target = cfg.next[i]
+        return cfg.r[target, 1, d] + cfg.w[i, d] * L
+    end
+end
+
+"""
     get_endpoint(cfg, i, L) -> Vector
 
 Return the coordinate of the M-th bead (endpoint) of polymer i.
 This is a derived quantity in Option A.
+NOTE: This allocates. Use the dimension-aware version for inner loops.
 """
 function get_endpoint(cfg::WormConfiguration, i::Int, L::Float64)
-    if cfg.sector == G_SECTOR && i == cfg.i_head
-        return cfg.r_c_head .+ cfg.w[i, :] .* L
-    else
-        target = cfg.P[i]
-        return cfg.r[target, 1, :] .+ cfg.w[i, :] .* L
+    D = size(cfg.r, 3)
+    out = zeros(D)
+    for d in 1:D
+        out[d] = get_endpoint(cfg, i, d, L)
     end
+    return out
 end
 
 """
@@ -142,12 +162,7 @@ Zero-allocation accessor.
     if j < M
         return cfg.r[i, j+1, d]
     elseif j == M
-        if cfg.sector == G_SECTOR && i == cfg.i_head
-            return cfg.r_c_head[d] + cfg.w[i, d] * L
-        else
-            target = cfg.P[i]
-            return cfg.r[target, 1, d] + cfg.w[i, d] * L
-        end
+        return get_endpoint(cfg, i, d, L)
     else
         throw(BoundsError("Bead index $j out of range [0, $M]"))
     end
@@ -177,13 +192,13 @@ end
 Find all particle indices in the permutation cycle containing particle i.
 """
 function get_cycle(cfg::WormConfiguration, i::Int)
-    N = length(cfg.P)
+    N = length(cfg.next)
     cycle = [i]
-    j = cfg.P[i]
+    j = cfg.next[i]
     count = 0
     while j != i && count < N
         push!(cycle, j)
-        j = cfg.P[j]
+        j = cfg.next[j]
         count += 1
     end
     return cycle
@@ -200,41 +215,48 @@ function recenter!(cfg::WormConfiguration, i::Int, L::Float64)
     M = size(cfg.r, 2)
     
     # Compute shift needed to put bead 0 in [0, L)^D
-    Δw = zeros(Int, D)
-    for d in 1:D
-        Δw[d] = floor(Int, cfg.r[i, 1, d] / L)
-    end
+    # Δw[d] is how many boxes we are away from fundamental cell
+    Δw_1 = floor(Int, cfg.r[i, 1, 1] / L)
+    Δw_2 = floor(Int, cfg.r[i, 1, 2] / L)
+    Δw_3 = floor(Int, cfg.r[i, 1, 3] / L)
     
-    if all(Δw .== 0)
-        return  # Already centered
+    if Δw_1 == 0 && Δw_2 == 0 && Δw_3 == 0
+        return nothing
     end
     
     # Shift beads 0..M-1 of polymer i
-    shift = Δw .* L
     for j in 1:M
-        cfg.r[i, j, :] .-= shift
+        cfg.r[i, j, 1] -= Δw_1 * L
+        cfg.r[i, j, 2] -= Δw_2 * L
+        cfg.r[i, j, 3] -= Δw_3 * L
     end
     
     # 2. Update i's own winding to keep its endpoint moving WITH its path.
-    # The endpoint depends on r[P[i], 1] (or r_c_head if head).
+    # The endpoint depends on r[next[i], 1] (or r_c_head if head).
     # Since only i was shifted, the winding must change unless the target also shifted.
     if cfg.sector == G_SECTOR && i == cfg.i_head
-        cfg.w[i, :] .-= Δw
-    elseif cfg.P[i] != i
-        cfg.w[i, :] .-= Δw
+        cfg.w[i, 1] -= Δw_1
+        cfg.w[i, 2] -= Δw_2
+        cfg.w[i, 3] -= Δw_3
+    elseif cfg.next[i] != i
+        cfg.w[i, 1] -= Δw_1
+        cfg.w[i, 2] -= Δw_2
+        cfg.w[i, 3] -= Δw_3
     end
     
-    # 3. Update windings of any polymer k that connects TO i.
+    # 3. Update windings of the polymer k that connects TO i.
     # Their endpoint r_end[k] = r[i, 1] + w[k]*L shifted by -shift.
     # To keep r_end[k] physically fixed, increase w[k].
-    N = size(cfg.r, 1)
-    for k in 1:N
-        if cfg.P[k] == i && k != i
-            if !(cfg.sector == G_SECTOR && k == cfg.i_head)
-                cfg.w[k, :] .+= Δw
-            end
+    # OPTIMIZED: Use prev[i] instead of O(N) search.
+    k = cfg.prev[i]
+    if k != i
+        if !(cfg.sector == G_SECTOR && k == cfg.i_head)
+            cfg.w[k, 1] += Δw_1
+            cfg.w[k, 2] += Δw_2
+            cfg.w[k, 3] += Δw_3
         end
     end
+    return nothing
 end
 
 """
@@ -252,7 +274,7 @@ function fix_all_windings!(cfg::WormConfiguration, L::Float64)
         if cfg.sector == G_SECTOR && i == cfg.i_head
             target_0 = cfg.r_c_head
         else
-            target_0 = cfg.r[cfg.P[i], 1, :]
+            target_0 = cfg.r[cfg.next[i], 1, :]
         end
         
         # Choose w to minimize |r_M_minus_1 - (target_0 + w*L)|
@@ -274,7 +296,7 @@ with all other particles.
 Ref: Spada et al. 2022, Eq. 57.
 """
 function get_interaction_action(cfg::WormConfiguration, sys::System, i::Int, j::Int)
-    N, L, D = sys.N, sys.L, sys.D
+    N, L, D, M = sys.N, sys.L, sys.D, sys.M
     if N == 1 || sys.U isa NullPairPotential
         return 0.0
     end
@@ -282,40 +304,80 @@ function get_interaction_action(cfg::WormConfiguration, sys::System, i::Int, j::
     λ, δτ = sys.λ, sys.τ
     a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
     
+    # HOIST particle i coordinates
+    ri_j_1 = get_bead(cfg, i, j, 1, L)
+    ri_j_2 = get_bead(cfg, i, j, 2, L)
+    ri_j_3 = get_bead(cfg, i, j, 3, L)
+    ri_n_1 = get_bead(cfg, i, j+1, 1, L)
+    ri_n_2 = get_bead(cfg, i, j+1, 2, L)
+    ri_n_3 = get_bead(cfg, i, j+1, 3, L)
+    
     action = 0.0
-    @inbounds for k in 1:N
-        k == i && continue
-        
-        d2_j = 0.0
-        d2_next = 0.0
-        dot_prod = 0.0
-        
-        for d in 1:D
-            # Use scalar accessor to avoid allocations
-            r_i_j_d = get_bead(cfg, i, j, d, L)
-            r_i_next_d = get_bead(cfg, i, j+1, d, L)
-            r_k_j_d = get_bead(cfg, k, j, d, L)
-            r_k_next_d = get_bead(cfg, k, j+1, d, L)
+
+    # BRANCH REMOVAL: Specialise the loop based on whether j+1 is an endpoint
+    if j < M - 1
+        # FAST PATH: k,j and k,j+1 are both internal beads (stored in cfg.r)
+        @inbounds for k in 1:N
+            k == i && continue
             
-            dx_j = r_i_j_d - r_k_j_d
-            dx_j -= L * round(dx_j / L)
-            d2_j += dx_j * dx_j
+            rk_j_1 = cfg.r[k, j+1, 1]
+            rk_j_2 = cfg.r[k, j+1, 2]
+            rk_j_3 = cfg.r[k, j+1, 3]
+            rk_n_1 = cfg.r[k, j+2, 1]
+            rk_n_2 = cfg.r[k, j+2, 2]
+            rk_n_3 = cfg.r[k, j+2, 3]
             
-            dx_next = r_i_next_d - r_k_next_d
-            dx_next -= L * round(dx_next / L)
-            d2_next += dx_next * dx_next
+            dx_j1 = ri_j_1 - rk_j_1; dx_j1 -= L * round(dx_j1 / L)
+            dx_j2 = ri_j_2 - rk_j_2; dx_j2 -= L * round(dx_j2 / L)
+            dx_j3 = ri_j_3 - rk_j_3; dx_j3 -= L * round(dx_j3 / L)
+            d2_j = dx_j1*dx_j1 + dx_j2*dx_j2 + dx_j3*dx_j3
+
+            dx_n1 = ri_n_1 - rk_n_1; dx_n1 -= L * round(dx_n1 / L)
+            dx_n2 = ri_n_2 - rk_n_2; dx_n2 -= L * round(dx_n2 / L)
+            dx_n3 = ri_n_3 - rk_n_3; dx_n3 -= L * round(dx_n3 / L)
+            d2_next = dx_n1*dx_n1 + dx_n2*dx_n2 + dx_n3*dx_n3
             
-            dot_prod += dx_j * dx_next
-        end
-        
-        if sys.U isa HardSpherePotential
-            ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
-            if ratio <= 0.0
-                return Inf
+            dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
+            
+            if sys.U isa HardSpherePotential
+                ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
+                if ratio <= 0.0; return Inf; end
+                action -= log(ratio)
+            else
+                action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
             end
-            action -= log(ratio)
-        else
-            action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
+        end
+    else
+        # SLOW PATH: At least one bead is an endpoint (derived)
+        @inbounds for k in 1:N
+            k == i && continue
+            
+            rk_j_1 = get_bead(cfg, k, j, 1, L)
+            rk_j_2 = get_bead(cfg, k, j, 2, L)
+            rk_j_3 = get_bead(cfg, k, j, 3, L)
+            rk_n_1 = get_bead(cfg, k, j+1, 1, L)
+            rk_n_2 = get_bead(cfg, k, j+1, 2, L)
+            rk_n_3 = get_bead(cfg, k, j+1, 3, L)
+            
+            dx_j1 = ri_j_1 - rk_j_1; dx_j1 -= L * round(dx_j1 / L)
+            dx_j2 = ri_j_2 - rk_j_2; dx_j2 -= L * round(dx_j2 / L)
+            dx_j3 = ri_j_3 - rk_j_3; dx_j3 -= L * round(dx_j3 / L)
+            d2_j = dx_j1*dx_j1 + dx_j2*dx_j2 + dx_j3*dx_j3
+
+            dx_n1 = ri_n_1 - rk_n_1; dx_n1 -= L * round(dx_n1 / L)
+            dx_n2 = ri_n_2 - rk_n_2; dx_n2 -= L * round(dx_n2 / L)
+            dx_n3 = ri_n_3 - rk_n_3; dx_n3 -= L * round(dx_n3 / L)
+            d2_next = dx_n1*dx_n1 + dx_n2*dx_n2 + dx_n3*dx_n3
+            
+            dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
+            
+            if sys.U isa HardSpherePotential
+                ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
+                if ratio <= 0.0; return Inf; end
+                action -= log(ratio)
+            else
+                action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
+            end
         end
     end
     return action
@@ -328,7 +390,7 @@ Interaction action for particle i at slice j with all particles NOT in cycle_mas
 Used to optimize translate! move.
 """
 function get_interaction_action_external(cfg::WormConfiguration, sys::System, i::Int, j::Int, cycle_mask::AbstractVector{Bool})
-    N, L, D = sys.N, sys.L, sys.D
+    N, L, D, M = sys.N, sys.L, sys.D, sys.M
     if N == 1 || sys.U isa NullPairPotential
         return 0.0
     end
@@ -336,39 +398,77 @@ function get_interaction_action_external(cfg::WormConfiguration, sys::System, i:
     λ, δτ = sys.λ, sys.τ
     a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
     
+    # HOIST particle i coordinates
+    ri_j_1 = get_bead(cfg, i, j, 1, L)
+    ri_j_2 = get_bead(cfg, i, j, 2, L)
+    ri_j_3 = get_bead(cfg, i, j, 3, L)
+    ri_n_1 = get_bead(cfg, i, j+1, 1, L)
+    ri_n_2 = get_bead(cfg, i, j+1, 2, L)
+    ri_n_3 = get_bead(cfg, i, j+1, 3, L)
+    
     action = 0.0
-    @inbounds for k in 1:N
-        cycle_mask[k] && continue
-        
-        d2_j = 0.0
-        d2_next = 0.0
-        dot_prod = 0.0
-        
-        for d in 1:D
-            r_i_j_d = get_bead(cfg, i, j, d, L)
-            r_i_next_d = get_bead(cfg, i, j+1, d, L)
-            r_k_j_d = get_bead(cfg, k, j, d, L)
-            r_k_next_d = get_bead(cfg, k, j+1, d, L)
+
+    if j < M - 1
+        @inbounds for k in 1:N
+            cycle_mask[k] && continue
             
-            dx_j = r_i_j_d - r_k_j_d
-            dx_j -= L * round(dx_j / L)
-            d2_j += dx_j * dx_j
+            rk_j_1 = cfg.r[k, j+1, 1]
+            rk_j_2 = cfg.r[k, j+1, 2]
+            rk_j_3 = cfg.r[k, j+1, 3]
+            rk_n_1 = cfg.r[k, j+2, 1]
+            rk_n_2 = cfg.r[k, j+2, 2]
+            rk_n_3 = cfg.r[k, j+2, 3]
             
-            dx_next = r_i_next_d - r_k_next_d
-            dx_next -= L * round(dx_next / L)
-            d2_next += dx_next * dx_next
+            dx_j1 = ri_j_1 - rk_j_1; dx_j1 -= L * round(dx_j1 / L)
+            dx_j2 = ri_j_2 - rk_j_2; dx_j2 -= L * round(dx_j2 / L)
+            dx_j3 = ri_j_3 - rk_j_3; dx_j3 -= L * round(dx_j3 / L)
+            d2_j = dx_j1*dx_j1 + dx_j2*dx_j2 + dx_j3*dx_j3
+
+            dx_n1 = ri_n_1 - rk_n_1; dx_n1 -= L * round(dx_n1 / L)
+            dx_n2 = ri_n_2 - rk_n_2; dx_n2 -= L * round(dx_n2 / L)
+            dx_n3 = ri_n_3 - rk_n_3; dx_n3 -= L * round(dx_n3 / L)
+            d2_next = dx_n1*dx_n1 + dx_n2*dx_n2 + dx_n3*dx_n3
             
-            dot_prod += dx_j * dx_next
-        end
-        
-        if sys.U isa HardSpherePotential
-            ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
-            if ratio <= 0.0
-                return Inf
+            dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
+            
+            if sys.U isa HardSpherePotential
+                ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
+                if ratio <= 0.0; return Inf; end
+                action -= log(ratio)
+            else
+                action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
             end
-            action -= log(ratio)
-        else
-            action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
+        end
+    else
+        @inbounds for k in 1:N
+            cycle_mask[k] && continue
+            
+            rk_j_1 = get_bead(cfg, k, j, 1, L)
+            rk_j_2 = get_bead(cfg, k, j, 2, L)
+            rk_j_3 = get_bead(cfg, k, j, 3, L)
+            rk_n_1 = get_bead(cfg, k, j+1, 1, L)
+            rk_n_2 = get_bead(cfg, k, j+1, 2, L)
+            rk_n_3 = get_bead(cfg, k, j+1, 3, L)
+            
+            dx_j1 = ri_j_1 - rk_j_1; dx_j1 -= L * round(dx_j1 / L)
+            dx_j2 = ri_j_2 - rk_j_2; dx_j2 -= L * round(dx_j2 / L)
+            dx_j3 = ri_j_3 - rk_j_3; dx_j3 -= L * round(dx_j3 / L)
+            d2_j = dx_j1*dx_j1 + dx_j2*dx_j2 + dx_j3*dx_j3
+
+            dx_n1 = ri_n_1 - rk_n_1; dx_n1 -= L * round(dx_n1 / L)
+            dx_n2 = ri_n_2 - rk_n_2; dx_n2 -= L * round(dx_n2 / L)
+            dx_n3 = ri_n_3 - rk_n_3; dx_n3 -= L * round(dx_n3 / L)
+            d2_next = dx_n1*dx_n1 + dx_n2*dx_n2 + dx_n3*dx_n3
+            
+            dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
+            
+            if sys.U isa HardSpherePotential
+                ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
+                if ratio <= 0.0; return Inf; end
+                action -= log(ratio)
+            else
+                action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
+            end
         end
     end
     return action
@@ -579,7 +679,7 @@ function open!(cfg::WormConfiguration, sys::System, params::WormParams)
     # Switch to G-sector temporarily to use get_endpoint with r_c_head
     cfg.sector = G_SECTOR
     cfg.i_head = i_H
-    cfg.i_tail = cfg.P[i_H]
+    cfg.i_tail = cfg.next[i_H]
     
     # Initialize r_c_head and head winding
     for d in 1:D
@@ -813,9 +913,9 @@ function swap!(cfg::WormConfiguration, sys::System, params::WormParams)
     Σ_0 = sum(weights_inv)
     if Σ_0 ≤ 0 return false end
     
-    # Identify i* such that P(i*) = i_0 (Spada: new head index)
-    i_star = findfirst(k -> cfg.P[k] == i_0, 1:N)
-    if isnothing(i_star) return false end
+    # Identify i* such that next(i*) = i_0 (Spada: new head index)
+    # OPTIMIZED: Use prev[i_0] instead of O(N) search.
+    i_star = cfg.prev[i_0]
     
     # Acceptance probability A_SW = Σ_P / Σ_0 (Spada Eq. 33)
     # Plus interaction energy difference
@@ -844,8 +944,11 @@ function swap!(cfg::WormConfiguration, sys::System, params::WormParams)
     
     if rand() < min(1.0, A_SW)
         # 4. Update permutation (local rewire)
-        cfg.P[i_H] = i_0
-        cfg.P[i_star] = i_T
+        cfg.next[i_H] = i_0
+        cfg.prev[i_0] = i_H
+        
+        cfg.next[i_star] = i_T
+        cfg.prev[i_T] = i_star
         
         # 5. New head index is i_star
         cfg.i_head = i_star
@@ -867,43 +970,51 @@ function energy_thermodynamic(cfg::WormConfiguration, sys::System)
     
     spring_sum = 0.0
     for i in 1:N
-        for j in 0:M-1
-            # Efficient distance calculation
+        # FAST PATH: Internal beads
+        @inbounds for j in 0:M-2
             d2 = 0.0
             for d in 1:D
-                dx = get_bead(cfg, i, j, d, L) - get_bead(cfg, i, j+1, d, L)
+                dx = cfg.r[i, j+1, d] - cfg.r[i, j+2, d]
                 d2 += dx * dx
             end
             spring_sum += d2
         end
+        # SLOW PATH: Endpoint
+        d2_end = 0.0
+        for d in 1:D
+            # Use get_bead to avoid vector allocations from get_endpoint
+            dx = cfg.r[i, M, d] - get_bead(cfg, i, M, d, L)
+            d2_end += dx * dx
+        end
+        spring_sum += d2_end
     end
     
     # Interaction term (Spada Eq. A1)
     int_contribution = 0.0
     if N > 1 && !(sys.U isa NullPairPotential)
         a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
-        for j in 0:M-1
-            for i in 1:N-1
+        # FAST PATH: Internal beads j in 0:M-2
+        for j in 0:M-2
+            @inbounds for i in 1:N-1
+                # Hoist i
+                ri_j_1 = cfg.r[i, j+1, 1]; ri_j_2 = cfg.r[i, j+1, 2]; ri_j_3 = cfg.r[i, j+1, 3]
+                ri_n_1 = cfg.r[i, j+2, 1]; ri_n_2 = cfg.r[i, j+2, 2]; ri_n_3 = cfg.r[i, j+2, 3]
+                
                 for k in i+1:N
-                    d2_j = 0.0
-                    d2_next = 0.0
-                    dot_prod = 0.0
-                    for d in 1:D
-                        r_i_j_d = get_bead(cfg, i, j, d, L)
-                        r_i_next_d = get_bead(cfg, i, j+1, d, L)
-                        r_k_j_d = get_bead(cfg, k, j, d, L)
-                        r_k_next_d = get_bead(cfg, k, j+1, d, L)
-                        
-                        dx_j = r_i_j_d - r_k_j_d
-                        dx_j -= L * round(dx_j / L)
-                        d2_j += dx_j * dx_j
-                        
-                        dx_next = r_i_next_d - r_k_next_d
-                        dx_next -= L * round(dx_next / L)
-                        d2_next += dx_next * dx_next
-                        
-                        dot_prod += dx_j * dx_next
-                    end
+                    rk_j_1 = cfg.r[k, j+1, 1]; rk_j_2 = cfg.r[k, j+1, 2]; rk_j_3 = cfg.r[k, j+1, 3]
+                    rk_n_1 = cfg.r[k, j+2, 1]; rk_n_2 = cfg.r[k, j+2, 2]; rk_n_3 = cfg.r[k, j+2, 3]
+                    
+                    dx_j1 = ri_j_1 - rk_j_1; dx_j1 -= L * round(dx_j1 / L)
+                    dx_j2 = ri_j_2 - rk_j_2; dx_j2 -= L * round(dx_j2 / L)
+                    dx_j3 = ri_j_3 - rk_j_3; dx_j3 -= L * round(dx_j3 / L)
+                    d2_j = dx_j1*dx_j1 + dx_j2*dx_j2 + dx_j3*dx_j3
+
+                    dx_n1 = ri_n_1 - rk_n_1; dx_n1 -= L * round(dx_n1 / L)
+                    dx_n2 = ri_n_2 - rk_n_2; dx_n2 -= L * round(dx_n2 / L)
+                    dx_n3 = ri_n_3 - rk_n_3; dx_n3 -= L * round(dx_n3 / L)
+                    d2_next = dx_n1*dx_n1 + dx_n2*dx_n2 + dx_n3*dx_n3
+                    
+                    dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
                     
                     if sys.U isa HardSpherePotential
                         _, _, _, du_dδτ = cao_berne_derivatives(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
@@ -911,6 +1022,35 @@ function energy_thermodynamic(cfg::WormConfiguration, sys::System)
                     else
                         int_contribution += 0.5 * (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next)))
                     end
+                end
+            end
+        end
+        # SLOW PATH: Endpoint j = M-1
+        j = M-1
+        for i in 1:N-1
+            ri_j_1 = get_bead(cfg, i, j, 1, L); ri_j_2 = get_bead(cfg, i, j, 2, L); ri_j_3 = get_bead(cfg, i, j, 3, L)
+            ri_n_1 = get_bead(cfg, i, j+1, 1, L); ri_n_2 = get_bead(cfg, i, j+1, 2, L); ri_n_3 = get_bead(cfg, i, j+1, 3, L)
+            for k in i+1:N
+                rk_j_1 = get_bead(cfg, k, j, 1, L); rk_j_2 = get_bead(cfg, k, j, 2, L); rk_j_3 = get_bead(cfg, k, j, 3, L)
+                rk_n_1 = get_bead(cfg, k, j+1, 1, L); rk_n_2 = get_bead(cfg, k, j+1, 2, L); rk_n_3 = get_bead(cfg, k, j+1, 3, L)
+                
+                dx_j1 = ri_j_1 - rk_j_1; dx_j1 -= L * round(dx_j1 / L)
+                dx_j2 = ri_j_2 - rk_j_2; dx_j2 -= L * round(dx_j2 / L)
+                dx_j3 = ri_j_3 - rk_j_3; dx_j3 -= L * round(dx_j3 / L)
+                d2_j = dx_j1*dx_j1 + dx_j2*dx_j2 + dx_j3*dx_j3
+
+                dx_n1 = ri_n_1 - rk_n_1; dx_n1 -= L * round(dx_n1 / L)
+                dx_n2 = ri_n_2 - rk_n_2; dx_n2 -= L * round(dx_n2 / L)
+                dx_n3 = ri_n_3 - rk_n_3; dx_n3 -= L * round(dx_n3 / L)
+                d2_next = dx_n1*dx_n1 + dx_n2*dx_n2 + dx_n3*dx_n3
+                
+                dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
+                
+                if sys.U isa HardSpherePotential
+                    _, _, _, du_dδτ = cao_berne_derivatives(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
+                    int_contribution += du_dδτ
+                else
+                    int_contribution += 0.5 * (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next)))
                 end
             end
         end
@@ -934,10 +1074,13 @@ function energy_virial(cfg::WormConfiguration, sys::System)
     # Term 2: (R_{M-1} - R_M) · (R_M - R_0)
     term2 = 0.0
     for i in 1:N
-        for d in 1:D
-            r_M_minus_1_d = get_bead(cfg, i, M - 1, d, L)
+        @inbounds for d in 1:D
+            # R_{M-1} is internal (index M)
+            r_M_minus_1_d = cfg.r[i, M, d]
+            # R_M is endpoint
             r_M_d = get_bead(cfg, i, M, d, L)
-            r_0_d = get_bead(cfg, i, 0, d, L)
+            # R_0 is internal (index 1)
+            r_0_d = cfg.r[i, 1, d]
             term2 += (r_M_minus_1_d - r_M_d) * (r_M_d - r_0_d)
         end
     end
@@ -951,67 +1094,68 @@ function energy_virial(cfg::WormConfiguration, sys::System)
         a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
         
         for j in 0:M-1
-            for i in 1:N-1
+            @inbounds for i in 1:N-1
+                # Hoist coordinates for particle i
+                ri_j_1 = get_bead(cfg, i, j, 1, L); ri_j_2 = get_bead(cfg, i, j, 2, L); ri_j_3 = get_bead(cfg, i, j, 3, L)
+                ri_n_1 = get_bead(cfg, i, j+1, 1, L); ri_n_2 = get_bead(cfg, i, j+1, 2, L); ri_n_3 = get_bead(cfg, i, j+1, 3, L)
+                ri_0_1 = get_bead(cfg, i, 0, 1, L);   ri_0_2 = get_bead(cfg, i, 0, 2, L);   ri_0_3 = get_bead(cfg, i, 0, 3, L)
+                
                 for k in i+1:N
-                    d2_j = 0.0
-                    d2_next = 0.0
-                    dot_prod = 0.0
-                    for d in 1:D
-                        r_i_j_d = get_bead(cfg, i, j, d, L)
-                        r_i_next_d = get_bead(cfg, i, j+1, d, L)
-                        r_k_j_d = get_bead(cfg, k, j, d, L)
-                        r_k_next_d = get_bead(cfg, k, j+1, d, L)
-                        
-                        dx_j = r_i_j_d - r_k_j_d
-                        dx_j -= L * round(dx_j / L)
-                        d2_j += dx_j * dx_j
-                        
-                        dx_next = r_i_next_d - r_k_next_d
-                        dx_next -= L * round(dx_next / L)
-                        d2_next += dx_next * dx_next
-                        
-                        dot_prod += dx_j * dx_next
-                    end
+                    rk_j_1 = get_bead(cfg, k, j, 1, L); rk_j_2 = get_bead(cfg, k, j, 2, L); rk_j_3 = get_bead(cfg, k, j, 3, L)
+                    rk_n_1 = get_bead(cfg, k, j+1, 1, L); rk_n_2 = get_bead(cfg, k, j+1, 2, L); rk_n_3 = get_bead(cfg, k, j+1, 3, L)
+                    rk_0_1 = get_bead(cfg, k, 0, 1, L);   rk_0_2 = get_bead(cfg, k, 0, 2, L);   rk_0_3 = get_bead(cfg, k, 0, 3, L)
+                    
+                    dx_j1 = ri_j_1 - rk_j_1; dx_j1 -= L * round(dx_j1 / L)
+                    dx_j2 = ri_j_2 - rk_j_2; dx_j2 -= L * round(dx_j2 / L)
+                    dx_j3 = ri_j_3 - rk_j_3; dx_j3 -= L * round(dx_j3 / L)
+                    d2_j = dx_j1*dx_j1 + dx_j2*dx_j2 + dx_j3*dx_j3
+
+                    dx_n1 = ri_n_1 - rk_n_1; dx_n1 -= L * round(dx_n1 / L)
+                    dx_n2 = ri_n_2 - rk_n_2; dx_n2 -= L * round(dx_n2 / L)
+                    dx_n3 = ri_n_3 - rk_n_3; dx_n3 -= L * round(dx_n3 / L)
+                    d2_next = dx_n1*dx_n1 + dx_n2*dx_n2 + dx_n3*dx_n3
+                    
+                    dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
                     
                     if sys.U isa HardSpherePotential
                         r_j = sqrt(d2_j)
-                        r_next = sqrt(d2_next)
-                        du_dr, du_dr_prime, du_dcos, du_dδτ = cao_berne_derivatives(r_j, r_next, dot_prod, a_hs, λ, δτ)
+                        r_n = sqrt(d2_next)
+                        du_dr, du_dr_prime, du_dcos, du_dδτ = cao_berne_derivatives(r_j, r_n, dot_prod, a_hs, λ, δτ)
+                        
+                        # Handle overlaps or forbidden regions
+                        if isinf(du_dr)
+                            return Inf
+                        end
+                        
                         term4 += du_dδτ
                         
+                        cos_θ = dot_prod / (r_j * r_n)
+                        cos_θ = clamp(cos_θ, -1.0, 1.0)
+                        
                         # Grad wrt r_ij (start of slice j)
-                        if j > 0
-                            cos_θ = dot_prod / (r_j * r_next)
-                            cos_θ = clamp(cos_θ, -1.0, 1.0)
-                            
-                            for d in 1:D
-                                dx_j = get_bead(cfg, i, j, d, L) - get_bead(cfg, k, j, d, L)
-                                dx_j -= L * round(dx_j / L)
-                                dx_next = get_bead(cfg, i, j+1, d, L) - get_bead(cfg, k, j+1, d, L)
-                                dx_next -= L * round(dx_next / L)
-                                
-                                grad_u_rij_d = (du_dr - du_dcos * cos_θ / r_j) * (dx_j / r_j) + (du_dcos / r_j) * (dx_next / r_next)
-                                term3 += (get_bead(cfg, i, j, d, L) - get_bead(cfg, i, 0, d, L)) * grad_u_rij_d
-                                term3 -= (get_bead(cfg, k, j, d, L) - get_bead(cfg, k, 0, d, L)) * grad_u_rij_d
-                            end
-                        end
+                        # g_i_j = (du_dr - du_dcos * cos_θ / r_j) * (dx_j / r_j) + (du_dcos / r_j) * (dx_next / r_n)
+                        inv_rj = 1.0/r_j; inv_rn = 1.0/r_n
+                        f1 = (du_dr - du_dcos * cos_θ * inv_rj) * inv_rj
+                        f2 = du_dcos * inv_rj * inv_rn
+                        
+                        g1_1 = f1*dx_j1 + f2*dx_n1; g1_2 = f1*dx_j2 + f2*dx_n2; g1_3 = f1*dx_j3 + f2*dx_n3
+                        
+                        # Term 3 contribution for start of slice
+                        term3 += (ri_j_1 - ri_0_1 - rk_j_1 + rk_0_1) * g1_1
+                        term3 += (ri_j_2 - ri_0_2 - rk_j_2 + rk_0_2) * g1_2
+                        term3 += (ri_j_3 - ri_0_3 - rk_j_3 + rk_0_3) * g1_3
                         
                         # Grad wrt r_ij_next (end of slice j)
-                        if j < M - 1
-                            cos_θ = dot_prod / (r_j * r_next)
-                            cos_θ = clamp(cos_θ, -1.0, 1.0)
-                            
-                            for d in 1:D
-                                dx_j = get_bead(cfg, i, j, d, L) - get_bead(cfg, k, j, d, L)
-                                dx_j -= L * round(dx_j / L)
-                                dx_next = get_bead(cfg, i, j+1, d, L) - get_bead(cfg, k, j+1, d, L)
-                                dx_next -= L * round(dx_next / L)
-                                
-                                grad_u_rij_next_d = (du_dr_prime - du_dcos * cos_θ / r_next) * (dx_next / r_next) + (du_dcos / r_next) * (dx_j / r_j)
-                                term3 += (get_bead(cfg, i, j+1, d, L) - get_bead(cfg, i, 0, d, L)) * grad_u_rij_next_d
-                                term3 -= (get_bead(cfg, k, j+1, d, L) - get_bead(cfg, k, 0, d, L)) * grad_u_rij_next_d
-                            end
-                        end
+                        # g_i_n = (du_dr_prime - du_dcos * cos_θ / r_n) * (dx_next / r_n) + (du_dcos / r_n) * (dx_j / r_j)
+                        f3 = (du_dr_prime - du_dcos * cos_θ * inv_rn) * inv_rn
+                        f4 = du_dcos * inv_rn * inv_rj
+                        
+                        g2_1 = f3*dx_n1 + f4*dx_j1; g2_2 = f3*dx_n2 + f4*dx_j2; g2_3 = f3*dx_n3 + f4*dx_j3
+                        
+                        # Term 3 contribution for end of slice
+                        term3 += (ri_n_1 - ri_0_1 - rk_n_1 + rk_0_1) * g2_1
+                        term3 += (ri_n_2 - ri_0_2 - rk_n_2 + rk_0_2) * g2_2
+                        term3 += (ri_n_3 - ri_0_3 - rk_n_3 + rk_0_3) * g2_3
                     else
                         term4 += 0.5 * (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next)))
                     end
@@ -1020,8 +1164,8 @@ function energy_virial(cfg::WormConfiguration, sys::System)
         end
     end
     
-    # E = DN/(2β) + term2/(4λδτ²NM) + term3/(2βN) + term4/NM
-    E = (D * N / (2 * β)) + (term2 / (4 * λ * δτ^2 * N * M)) + (term3 / (2 * β * N)) + (term4 / M)
+    # E = DN/(2β) + term2/(2λδτβM) + (term3 + term4)/M
+    E = (D * N / (2 * β)) + (term2 / (2 * λ * δτ * β * M)) + (term3 + term4) / M
     return E
 end
 
