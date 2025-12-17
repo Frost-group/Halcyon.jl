@@ -19,7 +19,7 @@ export System, Path, localMove!, total_energy, energy_virial
 export AbstractPotential, ExternalPotential, PairPotential,
        HarmonicPotential, DoubleWellPotential,
        LennardJonesPotential, CoulombPotential, YukawaPotential,
-       NullPairPotential
+       HardSpherePotential, NullPairPotential, cao_berne_ratio
 
 # Worm algorithm exports
 export Sector, Z_SECTOR, G_SECTOR, WormConfiguration, WormParams

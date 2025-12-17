@@ -1,21 +1,21 @@
 using StaticArrays
 
-Base.@kwdef struct System
+Base.@kwdef struct System{TV<:ExternalPotential, TU<:PairPotential}
     M::Int
     N::Int
     m::Float64 = 1.0
     D::Int = 3
     β::Float64 = 100.0
-    V::ExternalPotential = HarmonicPotential()
-    U::PairPotential = NullPairPotential()
+    V::TV = HarmonicPotential()
+    U::TU = NullPairPotential()
     λ::Float64 = 0.5
     τ::Float64 = 0.0   # imaginary time step; set via validated constructors
     L::Float64 = 1.0   # box length; assumes cubic box for now
 end
 
 function System(M::Integer, N::Integer; m::Float64=1.0, D::Integer=3, β::Float64=100.0,
-                V::ExternalPotential=HarmonicPotential(), U::PairPotential=NullPairPotential(),
-                λ::Float64=0.5, τ::Union{Nothing,Float64}=nothing, L::Float64=1.0)
+                V::TV=HarmonicPotential(), U::TU=NullPairPotential(),
+                λ::Float64=0.5, τ::Union{Nothing,Float64}=nothing, L::Float64=1.0) where {TV<:ExternalPotential, TU<:PairPotential}
     M ≤ 0 && throw(ArgumentError("M must be positive"))
     N ≤ 0 && throw(ArgumentError("N must be positive"))
     D ≤ 0 && throw(ArgumentError("D must be positive"))
@@ -23,7 +23,7 @@ function System(M::Integer, N::Integer; m::Float64=1.0, D::Integer=3, β::Float6
     λ ≤ 0 && throw(ArgumentError("λ must be positive"))
     τval = isnothing(τ) ? β/Int(M) : τ
     τval ≤ 0 && throw(ArgumentError("τ must be positive"))
-    return System(M=Int(M), N=Int(N), m=m, D=Int(D), β=β, V=V, U=U, λ=λ, τ=τval, L=L)
+    return System{TV, TU}(M=Int(M), N=Int(N), m=m, D=Int(D), β=β, V=V, U=U, λ=λ, τ=τval, L=L)
 end
 
 Base.show(io::IO, s::System) = print(io,

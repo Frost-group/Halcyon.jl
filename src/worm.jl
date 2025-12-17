@@ -115,17 +115,39 @@ function get_endpoint(cfg::WormConfiguration, i::Int, L::Float64)
 end
 
 """
-    get_bead(cfg, i, j, L) -> Vector
+    get_bead(cfg, i, j, L) -> Vector (copy or view)
 
 Return the coordinate of bead j (0 to M) of polymer i.
-For j < M, returns from cfg.r. For j = M, returns get_endpoint.
+NOTE: This allocates for j = M. Use the dimension-aware version for inner loops.
 """
 function get_bead(cfg::WormConfiguration, i::Int, j::Int, L::Float64)
     M = size(cfg.r, 2)
     if j < M
-        return cfg.r[i, j+1, :]
+        return @view cfg.r[i, j+1, :]
     elseif j == M
         return get_endpoint(cfg, i, L)
+    else
+        throw(BoundsError("Bead index $j out of range [0, $M]"))
+    end
+end
+
+"""
+    get_bead(cfg, i, j, d, L) -> Float64
+
+Return the d-th coordinate of bead j (0 to M) of polymer i.
+Zero-allocation accessor.
+"""
+@inline function get_bead(cfg::WormConfiguration, i::Int, j::Int, d::Int, L::Float64)
+    M = size(cfg.r, 2)
+    if j < M
+        return cfg.r[i, j+1, d]
+    elseif j == M
+        if cfg.sector == G_SECTOR && i == cfg.i_head
+            return cfg.r_c_head[d] + cfg.w[i, d] * L
+        else
+            target = cfg.P[i]
+            return cfg.r[target, 1, d] + cfg.w[i, d] * L
+        end
     else
         throw(BoundsError("Bead index $j out of range [0, $M]"))
     end
@@ -241,6 +263,135 @@ function fix_all_windings!(cfg::WormConfiguration, L::Float64)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Interaction Helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+    get_interaction_action(cfg, sys, i, j) -> Float64
+
+Interaction action for particle i at time slice j (between bead j and j+1)
+with all other particles.
+Ref: Spada et al. 2022, Eq. 57.
+"""
+function get_interaction_action(cfg::WormConfiguration, sys::System, i::Int, j::Int)
+    N, L, D = sys.N, sys.L, sys.D
+    if N == 1 || sys.U isa NullPairPotential
+        return 0.0
+    end
+    
+    λ, δτ = sys.λ, sys.τ
+    a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
+    
+    action = 0.0
+    @inbounds for k in 1:N
+        k == i && continue
+        
+        d2_j = 0.0
+        d2_next = 0.0
+        dot_prod = 0.0
+        
+        for d in 1:D
+            # Use scalar accessor to avoid allocations
+            r_i_j_d = get_bead(cfg, i, j, d, L)
+            r_i_next_d = get_bead(cfg, i, j+1, d, L)
+            r_k_j_d = get_bead(cfg, k, j, d, L)
+            r_k_next_d = get_bead(cfg, k, j+1, d, L)
+            
+            dx_j = r_i_j_d - r_k_j_d
+            dx_j -= L * round(dx_j / L)
+            d2_j += dx_j * dx_j
+            
+            dx_next = r_i_next_d - r_k_next_d
+            dx_next -= L * round(dx_next / L)
+            d2_next += dx_next * dx_next
+            
+            dot_prod += dx_j * dx_next
+        end
+        
+        if sys.U isa HardSpherePotential
+            ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
+            if ratio <= 0.0
+                return Inf
+            end
+            action -= log(ratio)
+        else
+            action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
+        end
+    end
+    return action
+end
+
+"""
+    get_interaction_action_external(cfg, sys, i, j, cycle_mask) -> Float64
+
+Interaction action for particle i at slice j with all particles NOT in cycle_mask.
+Used to optimize translate! move.
+"""
+function get_interaction_action_external(cfg::WormConfiguration, sys::System, i::Int, j::Int, cycle_mask::AbstractVector{Bool})
+    N, L, D = sys.N, sys.L, sys.D
+    if N == 1 || sys.U isa NullPairPotential
+        return 0.0
+    end
+    
+    λ, δτ = sys.λ, sys.τ
+    a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
+    
+    action = 0.0
+    @inbounds for k in 1:N
+        cycle_mask[k] && continue
+        
+        d2_j = 0.0
+        d2_next = 0.0
+        dot_prod = 0.0
+        
+        for d in 1:D
+            r_i_j_d = get_bead(cfg, i, j, d, L)
+            r_i_next_d = get_bead(cfg, i, j+1, d, L)
+            r_k_j_d = get_bead(cfg, k, j, d, L)
+            r_k_next_d = get_bead(cfg, k, j+1, d, L)
+            
+            dx_j = r_i_j_d - r_k_j_d
+            dx_j -= L * round(dx_j / L)
+            d2_j += dx_j * dx_j
+            
+            dx_next = r_i_next_d - r_k_next_d
+            dx_next -= L * round(dx_next / L)
+            d2_next += dx_next * dx_next
+            
+            dot_prod += dx_j * dx_next
+        end
+        
+        if sys.U isa HardSpherePotential
+            ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
+            if ratio <= 0.0
+                return Inf
+            end
+            action -= log(ratio)
+        else
+            action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
+        end
+    end
+    return action
+end
+
+"""
+    get_interaction_action_segment(cfg, sys, i, j0, j1) -> Float64
+
+Sum of interaction actions for particle i for slices j in j0:j1-1.
+"""
+function get_interaction_action_segment(cfg::WormConfiguration, sys::System, i::Int, j0::Int, j1::Int)
+    S = 0.0
+    for j in j0:(j1-1)
+        S_slice = get_interaction_action(cfg, sys, i, j)
+        if isinf(S_slice)
+            return Inf
+        end
+        S += S_slice
+    end
+    return S
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Lévy Construction for Staging
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -252,29 +403,25 @@ j0, j1 in 0:M.
 """
 function levy_sample!(cfg::WormConfiguration, i::Int, j0::Int, j1::Int, λ::Float64, δτ::Float64, L::Float64)
     D = size(cfg.r, 3)
-    M = size(cfg.r, 2)
-    
-    # Endpoint coordinate
-    r_end = get_bead(cfg, i, j1, L)
-    
-    # Starting coordinate
-    r_prev = copy(get_bead(cfg, i, j0, L))
     
     # Sample beads sequentially from j0+1 to j1-1
     for j in (j0 + 1):(j1 - 1)
-        # steps from j to j1
         Δj_fwd = j1 - j
         Δj_back = 1
         denom = Δj_fwd + Δj_back
-        
-        # Mean: bridge from r_prev to r_end
-        r_star = (Δj_fwd .* r_prev .+ Δj_back .* r_end) ./ denom
         σ = sqrt(2λ * δτ * Δj_back * Δj_fwd / denom)
         
-        # Update physical storage (beads 0..M-1)
-        # Bead j is at index j+1 in Julia
-        cfg.r[i, j + 1, :] .= r_star .+ σ .* randn(D)
-        r_prev .= cfg.r[i, j + 1, :]
+        for d in 1:D
+            r_prev_d = get_bead(cfg, i, j - 1, d, L)
+            r_end_d = get_bead(cfg, i, j1, d, L)
+            
+            # Mean: bridge from r_prev to r_end
+            r_star_d = (Δj_fwd * r_prev_d + Δj_back * r_end_d) / denom
+            
+            # Update physical storage (beads 0..M-1)
+            # Bead j is at index j+1 in Julia
+            cfg.r[i, j + 1, d] = r_star_d + σ * randn()
+        end
     end
 end
 
@@ -304,38 +451,61 @@ end
     translate!(cfg, sys, params) -> Bool
 """
 function translate!(cfg::WormConfiguration, sys::System, params::WormParams)
-    N, D, L = sys.N, sys.D, sys.L
+    N, M, D, L = sys.N, sys.M, sys.D, sys.L
     i = rand(1:N)
     cycle = get_cycle(cfg, i)
     Δr = params.r_max .* (2 .* rand(D) .- 1)
     
-    # Non-interacting acceptance
-    ΔU = 0.0
+    # Interaction energy change
+    # Optimized: only interactions between cycle and rest change.
+    in_cycle = zeros(Bool, N)
+    for p in cycle; in_cycle[p] = true; end
     
-    if rand() < exp(-ΔU)
-        M = size(cfg.r, 2)
-        for p in cycle
-            for j in 1:M
-                cfg.r[p, j, :] .+= Δr
-            end
-        end
-
-        if cfg.sector == G_SECTOR && any(==(cfg.i_head), cycle)
-            i_H = cfg.i_head
-            x = cfg.r_c_head .+ Δr
-            for d in 1:D
-                x_c, n = _wrap_compact_and_winding(x[d], L)
-                cfg.r_c_head[d] = x_c
-                cfg.w[i_H, d] += n
-            end
-        end
-        
-        for p in cycle
-            recenter!(cfg, p, L)
-        end
-        return true
+    S_int_old = 0.0
+    for p in cycle, j in 0:M-1
+        S_int_old += get_interaction_action_external(cfg, sys, p, j, in_cycle)
     end
-    return false
+    
+    # Store old positions and head state
+    r_old = copy(cfg.r[cycle, :, :])
+    r_c_H_old = copy(cfg.r_c_head)
+    w_old = copy(cfg.w[cycle, :])
+    
+    # Shift
+    for p in cycle
+        for j in 1:M
+            cfg.r[p, j, :] .+= Δr
+        end
+    end
+
+    if cfg.sector == G_SECTOR && any(==(cfg.i_head), cycle)
+        i_H = cfg.i_head
+        x = cfg.r_c_head .+ Δr
+        for d in 1:D
+            x_c, n = _wrap_compact_and_winding(x[d], L)
+            cfg.r_c_head[d] = x_c
+            cfg.w[i_H, d] += n
+        end
+    end
+    
+    for p in cycle
+        recenter!(cfg, p, L)
+    end
+    
+    S_int_new = 0.0
+    for p in cycle, j in 0:M-1
+        S_int_new += get_interaction_action_external(cfg, sys, p, j, in_cycle)
+    end
+    
+    if rand() < exp(S_int_old - S_int_new)
+        return true
+    else
+        # Revert
+        cfg.r[cycle, :, :] .= r_old
+        cfg.r_c_head .= r_c_H_old
+        cfg.w[cycle, :] .= w_old
+        return false
+    end
 end
 
 """
@@ -359,13 +529,14 @@ function redraw!(cfg::WormConfiguration, sys::System, params::WormParams)
     end
     
     r_old = copy(cfg.r[i, (j0+1):(min(j1,M)), :])
+    S_int_old = get_interaction_action_segment(cfg, sys, i, j0, j1)
     
     levy_sample!(cfg, i, j0, j1, λ, δτ, L)
+    S_int_new = get_interaction_action_segment(cfg, sys, i, j0, j1)
     
-    # Non-interacting acceptance
-    ΔU = 0.0
+    ΔS = S_int_new - S_int_old
     
-    if rand() < exp(-ΔU)
+    if rand() < exp(-ΔS)
         if j0 == 0
             recenter!(cfg, i, L)
         end
@@ -403,6 +574,7 @@ function open!(cfg::WormConfiguration, sys::System, params::WormParams)
     # Store old segment
     r_old_segment = copy(cfg.r[i_H, (j0+1):M, :])
     w_old = copy(cfg.w[i_H, :])
+    S_int_old = get_interaction_action_segment(cfg, sys, i_H, j0, M)
     
     # Switch to G-sector temporarily to use get_endpoint with r_c_head
     cfg.sector = G_SECTOR
@@ -417,13 +589,14 @@ function open!(cfg::WormConfiguration, sys::System, params::WormParams)
     end
     
     levy_sample!(cfg, i_H, j0, M, λ, δτ, L)
+    S_int_new = get_interaction_action_segment(cfg, sys, i_H, j0, M)
     
     # Free propagator ratio
     ρ_new = ρ_free_sp(r_j0, r_new_M, λ, Δj * δτ)
     ρ_old = ρ_free_sp(r_j0, r_old_M, λ, Δj * δτ)
     
     prefactor = params.C * N * (2Δ)^D / V
-    A_O = prefactor * ρ_new / ρ_old
+    A_O = prefactor * (ρ_new / ρ_old) * exp(S_int_old - S_int_new)
     
     if rand() < min(1.0, A_O)
         return true
@@ -474,6 +647,7 @@ function close!(cfg::WormConfiguration, sys::System, params::WormParams)
     w_old = copy(cfg.w[i_H, :])
     r_old_M = copy(r_head_M)
     r_j0 = get_bead(cfg, i_H, j0, L)
+    S_int_old = get_interaction_action_segment(cfg, sys, i_H, j0, M)
     
     # Propose closure: update winding to match r_T
     for d in 1:D
@@ -484,12 +658,13 @@ function close!(cfg::WormConfiguration, sys::System, params::WormParams)
     cfg.sector = Z_SECTOR
     
     levy_sample!(cfg, i_H, j0, M, λ, δτ, L)
+    S_int_new = get_interaction_action_segment(cfg, sys, i_H, j0, M)
     
     ρ_new = ρ_free_sp(r_j0, r_T, λ, Δj * δτ)
     ρ_old = ρ_free_sp(r_j0, r_old_M, λ, Δj * δτ)
     
     prefactor = V / (params.C * N * (2Δ)^D)
-    A_C = prefactor * ρ_new / ρ_old
+    A_C = prefactor * (ρ_new / ρ_old) * exp(S_int_old - S_int_new)
     
     if rand() < min(1.0, A_C)
         cfg.i_head = 1
@@ -522,6 +697,7 @@ function move_head!(cfg::WormConfiguration, sys::System, params::WormParams)
     r_c_head_old = copy(cfg.r_c_head)
     
     r_j0 = get_bead(cfg, i_H, j0, L)
+    S_int_old = get_interaction_action_segment(cfg, sys, i_H, j0, M)
     
     # Sample new head endpoint
     σ = sqrt(2λ * Δj * δτ)
@@ -534,9 +710,17 @@ function move_head!(cfg::WormConfiguration, sys::System, params::WormParams)
     end
     
     levy_sample!(cfg, i_H, j0, M, λ, δτ, L)
+    S_int_new = get_interaction_action_segment(cfg, sys, i_H, j0, M)
     
-    # Non-interacting acceptance = 1
-    return true
+    if rand() < exp(S_int_old - S_int_new)
+        return true
+    else
+        # Revert
+        cfg.r[i_H, (j0+1):M, :] .= r_old_segment
+        cfg.w[i_H, :] .= w_old
+        cfg.r_c_head .= r_c_head_old
+        return false
+    end
 end
 
 """
@@ -556,15 +740,23 @@ function move_tail!(cfg::WormConfiguration, sys::System, params::WormParams)
     r_old_segment = copy(cfg.r[i_T, 1:j1, :])
     # r[i_T, j1+1] is fixed (j1 < M) or endpoint (j1=M)
     r_j1 = get_bead(cfg, i_T, j1, L)
+    S_int_old = get_interaction_action_segment(cfg, sys, i_T, 0, j1)
     
     # Sample new bead 0
     σ = sqrt(2λ * Δj * δτ)
-    cfg.r[i_T, 1, :] .= r_j1 .+ σ .* randn(D)
+    r_new_0 = r_j1 .+ σ .* randn(D)
+    cfg.r[i_T, 1, :] .= r_new_0
     
     levy_sample!(cfg, i_T, 0, j1, λ, δτ, L)
+    S_int_new = get_interaction_action_segment(cfg, sys, i_T, 0, j1)
     
-    recenter!(cfg, i_T, L)
-    return true
+    if rand() < exp(S_int_old - S_int_new)
+        recenter!(cfg, i_T, L)
+        return true
+    else
+        cfg.r[i_T, 1:j1, :] .= r_old_segment
+        return false
+    end
 end
 
 """
@@ -626,79 +818,210 @@ function swap!(cfg::WormConfiguration, sys::System, params::WormParams)
     if isnothing(i_star) return false end
     
     # Acceptance probability A_SW = Σ_P / Σ_0 (Spada Eq. 33)
-    A_SW = Σ_P / Σ_0
+    # Plus interaction energy difference
+    S_int_old = get_interaction_action_segment(cfg, sys, i_0, 0, j_P)
+    
+    if rand() < min(1.0, Σ_P / Σ_0)  # Initial check to avoid unnecessary work? 
+                                    # No, Spada says A_SW = (Σ_P/Σ_0) * exp(ΔU)
+        # Actually, let's do it properly
+    end
+    
+    # Store old target bead 0 and segment
+    r_old_segment = copy(cfg.r[i_0, 1:j_P, :])
+    r_c_H_old = copy(cfg.r_c_head)
+    
+    # 1. Relocate i_0 bead 0 to the old head position
+    cfg.r[i_0, 1, :] .= r_c_H_old
+    
+    # 2. Relocate head compact coordinate to the old i_0 bead 0 position
+    cfg.r_c_head .= r_c_i0_0
+    
+    # 3. Redraw segment of i_0 from 0 to j_P via staging
+    levy_sample!(cfg, i_0, 0, j_P, λ, δτ, L)
+    S_int_new = get_interaction_action_segment(cfg, sys, i_0, 0, j_P)
+    
+    A_SW = (Σ_P / Σ_0) * exp(S_int_old - S_int_new)
     
     if rand() < min(1.0, A_SW)
-        # Store old target bead 0 and current head coordinate
-        r_c_i0_0_old = copy(cfg.r[i_0, 1, :])
-        r_c_H_old = copy(cfg.r_c_head)
-        
-        # 1. Relocate i_0 bead 0 to the old head position
-        cfg.r[i_0, 1, :] .= r_c_H_old
-        
-        # 2. Relocate head compact coordinate to the old i_0 bead 0 position
-        cfg.r_c_head .= r_c_i0_0_old
-        
-        # 3. Update permutation (local rewire)
-        # Old head (i_H) now points to i_0.
-        # i_star (which pointed to i_0) now points to i_T (the worm tail).
+        # 4. Update permutation (local rewire)
         cfg.P[i_H] = i_0
         cfg.P[i_star] = i_T
         
-        # 4. New head index is i_star
+        # 5. New head index is i_star
         cfg.i_head = i_star
-        
-        # 5. Redraw segment of i_0 from 0 to j_P via staging
-        # This links the new i_0,0 (at r_c_H_old) to i_0,j_P.
-        levy_sample!(cfg, i_0, 0, j_P, λ, δτ, L)
         
         recenter!(cfg, i_0, L)
         return true
+    else
+        # Revert
+        cfg.r[i_0, 1:j_P, :] .= r_old_segment
+        cfg.r_c_head .= r_c_H_old
+        return false
     end
     return false
 end
 
 function energy_thermodynamic(cfg::WormConfiguration, sys::System)
     N, M, D = sys.N, sys.M, sys.D
-    λ, δτ = sys.λ, sys.τ
+    λ, δτ, L = sys.λ, sys.τ, sys.L
     
     spring_sum = 0.0
     for i in 1:N
         for j in 0:M-1
-            r_j = get_bead(cfg, i, j, sys.L)
-            r_next = get_bead(cfg, i, j+1, sys.L)
-            spring_sum += sum(abs2, r_j .- r_next)
+            # Efficient distance calculation
+            d2 = 0.0
+            for d in 1:D
+                dx = get_bead(cfg, i, j, d, L) - get_bead(cfg, i, j+1, d, L)
+                d2 += dx * dx
+            end
+            spring_sum += d2
         end
     end
     
-    # Thermodynamic estimator (Spada Eq. A1):
-    # E = DN/(2δτ) - spring_sum / (4λ δτ² M)
-    E = D * N / (2 * δτ) - spring_sum / (4 * λ * δτ^2 * M)
+    # Interaction term (Spada Eq. A1)
+    int_contribution = 0.0
+    if N > 1 && !(sys.U isa NullPairPotential)
+        a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
+        for j in 0:M-1
+            for i in 1:N-1
+                for k in i+1:N
+                    d2_j = 0.0
+                    d2_next = 0.0
+                    dot_prod = 0.0
+                    for d in 1:D
+                        r_i_j_d = get_bead(cfg, i, j, d, L)
+                        r_i_next_d = get_bead(cfg, i, j+1, d, L)
+                        r_k_j_d = get_bead(cfg, k, j, d, L)
+                        r_k_next_d = get_bead(cfg, k, j+1, d, L)
+                        
+                        dx_j = r_i_j_d - r_k_j_d
+                        dx_j -= L * round(dx_j / L)
+                        d2_j += dx_j * dx_j
+                        
+                        dx_next = r_i_next_d - r_k_next_d
+                        dx_next -= L * round(dx_next / L)
+                        d2_next += dx_next * dx_next
+                        
+                        dot_prod += dx_j * dx_next
+                    end
+                    
+                    if sys.U isa HardSpherePotential
+                        _, _, _, du_dδτ = cao_berne_derivatives(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
+                        int_contribution += du_dδτ
+                    else
+                        int_contribution += 0.5 * (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next)))
+                    end
+                end
+            end
+        end
+    end
+    
+    # E = D*N/(2*δτ) - spring_sum/(4*λ*δτ^2*M) + 1/M * sum(dU/dδτ)
+    E = (D * N / (2 * δτ)) - (spring_sum / (4 * λ * δτ^2 * M)) + (int_contribution / M)
     return E
 end
 
 """
     energy_virial(cfg, sys) -> Float64
 
-Virial energy estimator for non-interacting system.
-Ref: Spada et al. 2022, Appendix Eq. A2 (with U=0)
+Virial energy estimator.
+Ref: Spada et al. 2022, Appendix Eq. A2
 """
 function energy_virial(cfg::WormConfiguration, sys::System)
     N, M, D = sys.N, sys.M, sys.D
     λ, δτ, β, L = sys.λ, sys.τ, sys.β, sys.L
     
+    # Term 2: (R_{M-1} - R_M) · (R_M - R_0)
     term2 = 0.0
     for i in 1:N
-        r_M_minus_1 = get_bead(cfg, i, M - 1, L)
-        r_M = get_bead(cfg, i, M, L)
-        r_0 = get_bead(cfg, i, 0, L)
-        
-        # (r_{M-1} - r_M) · (r_M - r_0)
-        term2 += sum((r_M_minus_1 .- r_M) .* (r_M .- r_0))
+        for d in 1:D
+            r_M_minus_1_d = get_bead(cfg, i, M - 1, d, L)
+            r_M_d = get_bead(cfg, i, M, d, L)
+            r_0_d = get_bead(cfg, i, 0, d, L)
+            term2 += (r_M_minus_1_d - r_M_d) * (r_M_d - r_0_d)
+        end
     end
     
-    # E_vir = DN/(2β) + term2 / (4λ δτ² M)
-    E = D * N / (2 * β) + term2 / (4 * λ * δτ^2 * M)
+    # Term 3: Coordinate derivatives
+    term3 = 0.0
+    # Term 4: δτ derivatives
+    term4 = 0.0
+    
+    if N > 1 && !(sys.U isa NullPairPotential)
+        a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
+        
+        for j in 0:M-1
+            for i in 1:N-1
+                for k in i+1:N
+                    d2_j = 0.0
+                    d2_next = 0.0
+                    dot_prod = 0.0
+                    for d in 1:D
+                        r_i_j_d = get_bead(cfg, i, j, d, L)
+                        r_i_next_d = get_bead(cfg, i, j+1, d, L)
+                        r_k_j_d = get_bead(cfg, k, j, d, L)
+                        r_k_next_d = get_bead(cfg, k, j+1, d, L)
+                        
+                        dx_j = r_i_j_d - r_k_j_d
+                        dx_j -= L * round(dx_j / L)
+                        d2_j += dx_j * dx_j
+                        
+                        dx_next = r_i_next_d - r_k_next_d
+                        dx_next -= L * round(dx_next / L)
+                        d2_next += dx_next * dx_next
+                        
+                        dot_prod += dx_j * dx_next
+                    end
+                    
+                    if sys.U isa HardSpherePotential
+                        r_j = sqrt(d2_j)
+                        r_next = sqrt(d2_next)
+                        du_dr, du_dr_prime, du_dcos, du_dδτ = cao_berne_derivatives(r_j, r_next, dot_prod, a_hs, λ, δτ)
+                        term4 += du_dδτ
+                        
+                        # Grad wrt r_ij (start of slice j)
+                        if j > 0
+                            cos_θ = dot_prod / (r_j * r_next)
+                            cos_θ = clamp(cos_θ, -1.0, 1.0)
+                            
+                            for d in 1:D
+                                dx_j = get_bead(cfg, i, j, d, L) - get_bead(cfg, k, j, d, L)
+                                dx_j -= L * round(dx_j / L)
+                                dx_next = get_bead(cfg, i, j+1, d, L) - get_bead(cfg, k, j+1, d, L)
+                                dx_next -= L * round(dx_next / L)
+                                
+                                grad_u_rij_d = (du_dr - du_dcos * cos_θ / r_j) * (dx_j / r_j) + (du_dcos / r_j) * (dx_next / r_next)
+                                term3 += (get_bead(cfg, i, j, d, L) - get_bead(cfg, i, 0, d, L)) * grad_u_rij_d
+                                term3 -= (get_bead(cfg, k, j, d, L) - get_bead(cfg, k, 0, d, L)) * grad_u_rij_d
+                            end
+                        end
+                        
+                        # Grad wrt r_ij_next (end of slice j)
+                        if j < M - 1
+                            cos_θ = dot_prod / (r_j * r_next)
+                            cos_θ = clamp(cos_θ, -1.0, 1.0)
+                            
+                            for d in 1:D
+                                dx_j = get_bead(cfg, i, j, d, L) - get_bead(cfg, k, j, d, L)
+                                dx_j -= L * round(dx_j / L)
+                                dx_next = get_bead(cfg, i, j+1, d, L) - get_bead(cfg, k, j+1, d, L)
+                                dx_next -= L * round(dx_next / L)
+                                
+                                grad_u_rij_next_d = (du_dr_prime - du_dcos * cos_θ / r_next) * (dx_next / r_next) + (du_dcos / r_next) * (dx_j / r_j)
+                                term3 += (get_bead(cfg, i, j+1, d, L) - get_bead(cfg, i, 0, d, L)) * grad_u_rij_next_d
+                                term3 -= (get_bead(cfg, k, j+1, d, L) - get_bead(cfg, k, 0, d, L)) * grad_u_rij_next_d
+                            end
+                        end
+                    else
+                        term4 += 0.5 * (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next)))
+                    end
+                end
+            end
+        end
+    end
+    
+    # E = DN/(2β) + term2/(4λδτ²NM) + term3/(2βN) + term4/NM
+    E = (D * N / (2 * β)) + (term2 / (4 * λ * δτ^2 * N * M)) + (term3 / (2 * β * N)) + (term4 / M)
     return E
 end
 
