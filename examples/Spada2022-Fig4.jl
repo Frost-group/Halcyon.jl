@@ -74,7 +74,7 @@ function run_simulation(N::Int, β::Float64, L_box::Float64; verbose::Bool=false
         Halcyon.worm_step!(cfg, sys, params)
         
         if step % MEASURE_INTERVAL == 0 && cfg.sector == Halcyon.Z_SECTOR
-            E = Halcyon.energy_thermodynamic(cfg, sys)
+            E = Halcyon.energy_virial(cfg, sys)
             push!(energies, E / N)  # Store E/N
         end
         

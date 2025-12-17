@@ -92,7 +92,7 @@ function run_simulation(M::Int, β::Float64; verbose::Bool=false)
         
         # Only measure in Z-sector (diagonal configurations)
         if step % MEASURE_INTERVAL == 0 && cfg.sector == Halcyon.Z_SECTOR
-            E = Halcyon.energy_thermodynamic(cfg, sys)
+            E = Halcyon.energy_virial(cfg, sys)
             push!(energies, E)
             n_measurements += 1
         end

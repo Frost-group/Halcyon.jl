@@ -75,7 +75,8 @@ function run_simulation(M::Int, β::Float64; verbose::Bool=false)
         end
         
         if step % MEASURE_INTERVAL == 0 && cfg.sector == Halcyon.Z_SECTOR
-            E = Halcyon.energy_thermodynamic(cfg, sys)
+            E = Halcyon.energy_virial(cfg, sys) # seems better SNR particularly at low T
+            #E = Halcyon.energy_thermodynamic(cfg, sys)
             push!(energies, E)
         end
         
@@ -147,7 +148,7 @@ function main()
     
     n = N / L^D
     T_c0 = Halcyon.critical_temperature(n, λ)
-    E_scale = T_c0
+    E_scale = N * T_c0
     
     M_plot = Float64.(M_values)
     
