@@ -28,8 +28,8 @@ end
     const n_target = gas_parameter / a_hs^3
 
     # MC parameters
-    const EQUILIBRATION_STEPS = 500_000
-    const MEASUREMENT_STEPS = 500_000
+    const EQUILIBRATION_STEPS = 10_000
+    const MEASUREMENT_STEPS = 100_000
     const MEASURE_INTERVAL = 100
 
     function run_simulation(N::Int, M::Int, β::Float64, L_box::Float64; verbose::Bool=false)
@@ -82,7 +82,8 @@ end
         res_vi = (mean(energies_vi), std(energies_vi) / sqrt(length(energies_vi)))
         
         if verbose
-            @printf("  [Worker %d] N=%d, M=%d: Done (Z-sector %.1f%%)\n", myid(), N, M, 100*n_Z/MEASUREMENT_STEPS)
+            @printf(" N=%d, M=%d: Done (Z-sector %.1f%%) %d measurements\n", 
+            N, M, 100*n_Z/MEASUREMENT_STEPS, length(energies_th))
         end
         return res_th, res_vi
     end
@@ -132,7 +133,7 @@ function main()
     sort!(params_list, by=p -> p[2]^2 * p[3], rev=true)
     # Major leagues first, then back fill small tasks
     #  The opposite to what I was doing on single CPU, as I wanted to see the data come back live...
-     
+
 
     println("Starting parallel execution of $(length(params_list)) simulations...")
     
@@ -201,7 +202,8 @@ function main()
         end
         
         Gnuplot.save("Spada2022-Fig5$suffix.png", term="pngcairo size 800,500 enhanced font 'Helvetica,12'")
-        println("Saved: Spada2022-Fig5$suffix.png")
+        Gnuplot.save("Spada2022-Fig5$suffix.pdf", term="pdfcairo size 4in,3in enhanced font 'Helvetica,10'")
+        println("Saved: Spada2022-Fig5$suffix.{png,pdf}")
     end
     
     # Cleanup
