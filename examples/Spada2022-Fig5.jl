@@ -127,7 +127,13 @@ function main()
             end
         end
     end
-    
+   
+    # Sort by complexity (N^2 * M) ; pmap then iterates through the list in order
+    sort!(params_list, by=p -> p[2]^2 * p[3], rev=true)
+    # Major leagues first, then back fill small tasks
+    #  The opposite to what I was doing on single CPU, as I wanted to see the data come back live...
+     
+
     println("Starting parallel execution of $(length(params_list)) simulations...")
     
     # 2. Execute in parallel
