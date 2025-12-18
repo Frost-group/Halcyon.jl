@@ -1164,8 +1164,9 @@ function energy_virial(cfg::WormConfiguration, sys::System)
         end
     end
     
-    # E = DN/(2β) + term2/(2λδτβM) + (term3 + term4)/M
-    E = (D * N / (2 * β)) + (term2 / (2 * λ * δτ * β * M)) + (term3 + term4) / M
+    # Spada Eq. A2: E_vir/N = D/(2β) + term2/(4λδτ²NM) + term3/(2βN) + term4/(NM)
+    # term2 summed over N particles, term3 and term4 summed over pairs and slices
+    E = (D * N / (2 * β)) + (term2 / (4 * λ * δτ^2 * M)) + (term3 / (2 * β)) + (term4 / M)
     return E
 end
 
