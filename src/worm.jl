@@ -1017,8 +1017,8 @@ function energy_thermodynamic(cfg::WormConfiguration, sys::System)
                     dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
                     
                     if sys.U isa HardSpherePotential
-                        _, _, _, du_dδτ = cao_berne_derivatives(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
-                        int_contribution += du_dδτ
+                        # Skip du_dδτ for Cao-Berne (wrong M-dependence)
+                        # Thermodynamic estimator not reliable for pair-product approx
                     else
                         int_contribution += 0.5 * (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next)))
                     end
@@ -1047,8 +1047,7 @@ function energy_thermodynamic(cfg::WormConfiguration, sys::System)
                 dot_prod = dx_j1*dx_n1 + dx_j2*dx_n2 + dx_j3*dx_n3
                 
                 if sys.U isa HardSpherePotential
-                    _, _, _, du_dδτ = cao_berne_derivatives(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
-                    int_contribution += du_dδτ
+                    # Skip du_dδτ for Cao-Berne (wrong M-dependence)
                 else
                     int_contribution += 0.5 * (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next)))
                 end
@@ -1127,7 +1126,10 @@ function energy_virial(cfg::WormConfiguration, sys::System)
                             return Inf
                         end
                         
-                        term4 += du_dδτ
+                        # NOTE: Skip term4 for Cao-Berne. The du_dδτ derivative has wrong 
+                        # M-dependence for pair-product approximations (decreases as M→∞
+                        # instead of converging). The virial term (term3) captures interaction.
+                        # term4 += du_dδτ
                         
                         cos_θ = dot_prod / (r_j * r_n)
                         cos_θ = clamp(cos_θ, -1.0, 1.0)
