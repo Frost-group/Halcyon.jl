@@ -77,6 +77,39 @@ end
 Base.show(io::IO, obj::HardSpherePotential) = print(io, "HardSpherePotential(a=$(obj.a))")
 
 """
+    AzizPotential (HFD-B)
+
+Helium-4 Aziz potential (HFD-B form).
+Ref: Aziz et al., 1987, Mol. Phys. 61, 1487.
+Units: K for energy, Å for distance.
+"""
+@kwdef struct AzizPotential <: PairPotential
+    ϵ::Float64 = 10.948
+    rm::Float64 = 2.963
+    A::Float64 = 1.84431e5
+    α::Float64 = 10.43329
+    c6::Float64 = 1.3674521
+    c8::Float64 = 0.4212356
+    c10::Float64 = 0.1747339
+    D::Float64 = 1.4826
+end
+
+function (U::AzizPotential)(r::Float64)
+    x = r / U.rm
+    # Damping function
+    f_d = x < U.D ? exp(-(U.D/x - 1)^2) : 1.0
+    attr = (U.c6/x^6 + U.c8/x^8 + U.c10/x^10) * f_d
+    rep = U.A * exp(-U.α * x)
+    return U.ϵ * (rep - attr)
+end
+
+function (U::AzizPotential)(r::AbstractVector{<:Real})
+    return U(norm(r))
+end
+
+Base.show(io::IO, obj::AzizPotential) = print(io, "AzizPotential(ϵ=$(obj.ϵ), rm=$(obj.rm))")
+
+"""
     cao_berne_ratio(r1, r2, dot_product, a, λ, δτ) -> Float64
 
 Cao-Berne approximation for the relative density matrix ratio ρ_rel/ρ_rel0

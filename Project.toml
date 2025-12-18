@@ -1,9 +1,10 @@
 name = "Halcyon"
 uuid = "ea65e02c-02a1-4f91-acc1-0c78ab1071d7"
-authors = ["Jarvist Moore Frost <jarvist@gmail.com>"]
 version = "0.1.0"
+authors = ["Jarvist Moore Frost <jarvist@gmail.com>"]
 
 [deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 Gnuplot = "dc211083-a33a-5b79-959f-2ff34033469d"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -11,6 +12,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
+BenchmarkTools = "1.6.3"
 ForwardDiff = "0.10.38"
 Gnuplot = "1.6.5"
 StatsBase = "0.34.4"
