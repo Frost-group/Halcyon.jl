@@ -41,7 +41,7 @@ function run_nk_simulation(T::Float64)
     end
 
     println("Sampling n(k)...")
-    nbins = 128 # Increased resolution for finer k-grid
+    nbins = 256 # Fine k-grid for low-k resolution
     rho1_hist = zeros(nbins, nbins, nbins)
 
     samples_count = 0

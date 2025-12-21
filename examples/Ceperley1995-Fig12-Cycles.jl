@@ -74,7 +74,7 @@ function run_point(T::Float64)
 
     # P(m) = m * <N_m> / N
     probs = Float64[]
-    for m in 1:5 # Plot m=1 to 5 as in Fig 12
+    for m in 1:10 # Plot m=1 to 10 for long-cycle behavior
         avg_Nm = total_counts[m] / samples_count
         pm = (m * avg_Nm) / N
         push!(probs, pm)
@@ -88,12 +88,12 @@ end
 # ═══════════════════════════════════════════════════════════════════════════════
 
 data_T = Float64[]
-data_Pm = [Float64[] for _ in 1:5]
+data_Pm = [Float64[] for _ in 1:10]
 
 for T in temperatures
     pm_T = run_point(T)
     push!(data_T, T)
-    for m in 1:5
+    for m in 1:10
         push!(data_Pm[m], pm_T[m])
     end
 end
@@ -115,10 +115,10 @@ println("\nGenerating plot...")
 # Plot P_1 (Monomers) - Solid Line
 @gp :- data_T data_Pm[1] "w lp lw 3 pt 7 lc rgb 'black' title 'm=1'"
 
-# Plot P_m for m=2,3,4,5 - Dashed Lines
-colors = ["red", "blue", "green", "orange"]
-for m in 2:5
-    @gp :- data_T data_Pm[m] "w lp lw 2 pt 6 dt $(m-1) lc rgb '$(colors[m-1])' title 'm=$m'"
+# Plot P_m for m=2..10 - Dashed Lines
+colors = ["red", "blue", "green", "orange", "purple", "cyan", "magenta", "brown", "gray"]
+for m in 2:10
+    @gp :- data_T data_Pm[m] "w lp lw 2 pt 6 dt $(mod(m-1,4)+1) lc rgb '$(colors[m-1])' title 'm=$m'"
 end
 
 Gnuplot.save("Ceperley1995_Fig12_CycleLengths.png", term="pngcairo size 800,600 enhanced font 'Helvetica,14'")

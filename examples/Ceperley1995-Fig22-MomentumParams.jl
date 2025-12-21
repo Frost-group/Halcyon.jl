@@ -31,7 +31,7 @@ const MEASURE_INTERVAL = 10
 
 const R_BINS = 200
 # Grid for density matrix histogram (3D)
-const GRID_BINS = 128 # 128^3 grid for FFT (finer resolution)
+const GRID_BINS = 256 # 256^3 grid for FFT (finer resolution)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Simulation
