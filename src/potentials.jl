@@ -88,6 +88,7 @@ Units: K for energy, Å for distance.
     rm::Float64 = 2.963
     A::Float64 = 1.84431e5
     α::Float64 = 10.43329
+    β::Float64 = -2.27965
     c6::Float64 = 1.3674521
     c8::Float64 = 0.4212356
     c10::Float64 = 0.1747339
@@ -97,9 +98,9 @@ end
 function (U::AzizPotential)(r::Float64)
     x = r / U.rm
     # Damping function
-    f_d = x < U.D ? exp(-(U.D/x - 1)^2) : 1.0
-    attr = (U.c6/x^6 + U.c8/x^8 + U.c10/x^10) * f_d
-    rep = U.A * exp(-U.α * x)
+    f_d = x < U.D ? exp(-(U.D / x - 1)^2) : 1.0
+    attr = (U.c6 / x^6 + U.c8 / x^8 + U.c10 / x^10) * f_d
+    rep = U.A * exp(-U.α * x + U.β * x^2)
     return U.ϵ * (rep - attr)
 end
 
@@ -120,15 +121,15 @@ Ref: Spada et al. 2022, Eq. 56.
     if r1 <= a || r2 <= a
         return 0.0
     end
-    
+
     cos_θ = dot_product / (r1 * r2)
     cos_θ = clamp(cos_θ, -1.0, 1.0)
-    
+
     exponent = -(r1 * r2 + a^2 - a * (r1 + r2)) * (1.0 + cos_θ) / (4.0 * λ * δτ)
-    
+
     term = (a * (r1 + r2) - a^2) / (r1 * r2)
     ratio = 1.0 - term * exp(exponent)
-    
+
     return max(0.0, ratio)
 end
 
@@ -141,33 +142,33 @@ Returns derivatives with respect to |r1|, |r2|, cos(θ), and δτ.
 @inline function cao_berne_derivatives(r1::Float64, r2::Float64, dot_product::Float64, a::Float64, λ::Float64, δτ::Float64)
     cos_θ = dot_product / (r1 * r2)
     cos_θ = clamp(cos_θ, -1.0, 1.0)
-    
+
     C = 4.0 * λ * δτ
     K = r1 * r2 + a^2 - a * (r1 + r2)
     B = (a * (r1 + r2) - a^2) / (r1 * r2)
-    
+
     expr = exp(-K * (1.0 + cos_θ) / C)
     ratio = 1.0 - B * expr
-    
+
     if ratio <= 0.0
         return (Inf, Inf, Inf, Inf)
     end
-    
+
     common = expr / ratio
-    
+
     dB_dr1 = (a^2 - a * r2) / (r1^2 * r2)
     dB_dr2 = (a^2 - a * r1) / (r2^2 * r1)
-    
+
     dExp_dr1 = -(r2 - a) * (1.0 + cos_θ) / C
     dExp_dr2 = -(r1 - a) * (1.0 + cos_θ) / C
     dExp_dcos = -K / C
     dExp_dδτ = K * (1.0 + cos_θ) / (C * δτ)
-    
+
     du_dr1 = common * (dB_dr1 + B * dExp_dr1)
     du_dr2 = common * (dB_dr2 + B * dExp_dr2)
     du_dcos = common * (B * dExp_dcos)
     du_dδτ = common * (B * dExp_dδτ)
-    
+
     return (du_dr1, du_dr2, du_dcos, du_dδτ)
 end
 
@@ -178,4 +179,3 @@ struct NullPairPotential <: PairPotential end
 
 Base.show(io::IO, obj::NullPairPotential) = print(io, "NullPairPotential()")
 
- 
