@@ -110,6 +110,36 @@ end
 
 Base.show(io::IO, obj::AzizPotential) = print(io, "AzizPotential(ϵ=$(obj.ϵ), rm=$(obj.rm))")
 
+function potential_derivative(u::AzizPotential, r::Real)
+    # dV/dr for Aziz Potential
+    x = r / u.rm
+    x2 = x * x
+
+    # Repulsive part: A * exp(-alpha * x)
+    # d/dr (exp(-alpha * r/rm)) = -alpha/rm * exp(-alpha * r/rm)
+    dV_rep = u.A * (-u.α / u.rm) * exp(-u.α * x)
+
+    # Attractive part: (C6/x^6 + C8/x^8 + C10/x^10) * F(x)
+    # For r > rm (x > 1), F(x) = 1.
+    # For r < rm (x < 1), F(x) = exp(-(D/x - 1)^2)
+
+    C_term = u.c6 / (x^6) + u.c8 / (x^8) + u.c10 / (x^10)
+    dC_term = (-6 * u.c6 / x^7 - 8 * u.c8 / x^9 - 10 * u.c10 / x^11) / u.rm
+
+    if x >= 1.0
+        dV_att = u.ϵ * dC_term
+    else
+        f_x = exp(-(u.D / x - 1.0)^2)
+        # dF/dx = F(x) * (2*D/x^2) * (D/x - 1)
+        df_dx = f_x * (2 * u.D / (x^2)) * (u.D / x - 1.0)
+        df_dr = df_dx / u.rm
+
+        dV_att = u.ϵ * (dC_term * f_x + C_term * df_dr)
+    end
+
+    return dV_rep + dV_att
+end
+
 """
     cao_berne_ratio(r1, r2, dot_product, a, λ, δτ) -> Float64
 
@@ -178,4 +208,5 @@ struct NullPairPotential <: PairPotential end
 (::NullPairPotential)(r::AbstractVector{<:Real}) = 0.0
 
 Base.show(io::IO, obj::NullPairPotential) = print(io, "NullPairPotential()")
+
 

@@ -18,9 +18,9 @@ const r_max = L_box / 2
 const nbins = 100
 
 # MC parameters
-const EQUILIBRATION_STEPS = 50_000
-const MEASUREMENT_STEPS = 100_000
-const MEASUREMENT_STRIDE = 100
+const EQUILIBRATION_STEPS = 100_000
+const MEASUREMENT_STEPS = 10_000_000
+const MEASUREMENT_STRIDE = 1000
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Simulation
@@ -49,7 +49,7 @@ function run_gr_simulation(T::Float64)
     for step in 1:MEASUREMENT_STEPS
         worm_step!(cfg, sys, params)
 
-        if step % MEASUREMENT_STRIDE == 0
+        if step % MEASUREMENT_STRIDE == 0 # I don't think we care whether G or Z sector?
             rc, gr = radial_distribution(cfg, sys; nbins=nbins, r_max=r_max)
             gr_accum .+= gr
             count += 1
@@ -82,8 +82,9 @@ end
 @gp :- "set xlabel 'r (Å)'"
 @gp :- "set ylabel 'g(r)'"
 @gp :- "set grid"
-@gp :- "set yrange [0:3.0]"
-@gp :- "set xrange [0:7]"
+@gp :- "set yrange [0:1.5]"
+@gp :- "set xrange [0:8]"
+@gp :- "set size square"
 
 # Plot T=4.0K
 data_4K = results[4.0]
