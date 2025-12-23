@@ -27,7 +27,7 @@ end
     const L = (N / rho)^(1 / 3)
     const λ = 6.0596 # Å² K
 
-    # MC parameters
+    # MC parameters. About half an hour for 12 sweeps with ~110k total moves
     const EQUILIBRATION_STEPS = 10_000
     const MEASUREMENT_STEPS = 100_000
     const MEASURE_INTERVAL = 100
@@ -63,13 +63,18 @@ end
             if step % MEASURE_INTERVAL == 0
                 collect_sample = true # i.e. hit interval... now collect sample...
             end
-            if collect_sample && cfg.sector == Z_SECTOR # ...as soon as we hit Z-sector, worm reconnects
-                # 1. Thermodynamics
-                push!(E_thermo_samples, energy_thermodynamic(cfg, sys))
-                push!(E_virial_samples, energy_virial(cfg, sys))
-                push!(rhos_samples, superfluid_fraction(cfg, sys))
+            if step % MEASURE_INTERVAL == 0 # whichever sector...
+                #collect_sample && cfg.sector == Z_SECTOR # ...as soon as we hit Z-sector, worm reconnects
+                # 1. Thermodynamics, only if in Z...
+                if cfg.sector == Z_SECTOR
+                    push!(E_thermo_samples, energy_thermodynamic(cfg, sys))
+                    push!(E_virial_samples, energy_virial(cfg, sys))
+                end
 
-                # 2. Permutation Cycles
+                push!(rhos_samples, superfluid_fraction(cfg, sys))
+                # not sure about this one?
+
+                # 2. Permutation Cycles... seem ok in both sectors?
                 visited = zeros(Bool, N)
                 for i in 1:N
                     if !visited[i]
