@@ -1,5 +1,24 @@
 using StaticArrays
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Quantum Statistics Enum
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+QuantumStatistics: Quantum statistics for identical particles.
+
+- Boltzmannons: Distinguishable particles (classical, no symmetry)
+- Bosons: Symmetric wavefunctions (S = +1 always)
+- Fermions: Antisymmetric wavefunctions (S = (-1)^(N - n_c))
+
+Future: Partial statistics for sign problem alleviation.
+"""
+@enum QuantumStatistics Boltzmannons Bosons Fermions
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# System Type
+# ═══════════════════════════════════════════════════════════════════════════════
+
 Base.@kwdef struct System{TV<:ExternalPotential,TU<:PairPotential}
     M::Int
     N::Int
@@ -11,11 +30,13 @@ Base.@kwdef struct System{TV<:ExternalPotential,TU<:PairPotential}
     λ::Float64 = 0.5
     τ::Float64 = 0.0   # imaginary time step; set via validated constructors
     L::Float64 = 1.0   # box length; assumes cubic box for now
+    statistics::QuantumStatistics = Bosons  # Quantum statistics
 end
 
 function System(M::Integer, N::Integer; m::Float64=1.0, D::Integer=3, β::Float64=100.0,
     V::TV=HarmonicPotential(), U::TU=NullPairPotential(),
-    λ::Float64=0.5, τ::Union{Nothing,Float64}=nothing, L::Float64=1.0) where {TV<:ExternalPotential,TU<:PairPotential}
+    λ::Float64=0.5, τ::Union{Nothing,Float64}=nothing, L::Float64=1.0,
+    statistics::QuantumStatistics=Bosons) where {TV<:ExternalPotential,TU<:PairPotential}
     M ≤ 0 && throw(ArgumentError("M must be positive"))
     N ≤ 0 && throw(ArgumentError("N must be positive"))
     D ≤ 0 && throw(ArgumentError("D must be positive"))
@@ -23,7 +44,7 @@ function System(M::Integer, N::Integer; m::Float64=1.0, D::Integer=3, β::Float6
     λ ≤ 0 && throw(ArgumentError("λ must be positive"))
     τval = isnothing(τ) ? β / Int(M) : τ
     τval ≤ 0 && throw(ArgumentError("τ must be positive"))
-    return System{TV,TU}(M=Int(M), N=Int(N), m=m, D=Int(D), β=β, V=V, U=U, λ=λ, τ=τval, L=L)
+    return System{TV,TU}(M=Int(M), N=Int(N), m=m, D=Int(D), β=β, V=V, U=U, λ=λ, τ=τval, L=L, statistics=statistics)
 end
 
 Base.show(io::IO, s::System) = print(io,

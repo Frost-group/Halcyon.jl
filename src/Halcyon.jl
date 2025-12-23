@@ -13,6 +13,7 @@ include("analysis.jl")
 # Core types
 export System, WormConfiguration, WormParams
 export Sector, Z_SECTOR, G_SECTOR
+export QuantumStatistics, Boltzmannons, Bosons, Fermions
 
 # Potentials
 export AbstractPotential, ExternalPotential, PairPotential
@@ -28,6 +29,7 @@ export translate!, redraw!, open!, close!, swap!, move_head!, move_tail!, worm_s
 export energy_thermodynamic, energy_virial, energy_components
 export get_cycle, extract_extended_path, recenter!
 export get_bead, get_endpoint, total_winding, superfluid_fraction
+export count_cycles, permutation_sign  # Fermion sign tracking
 export radial_distribution, accumulate_density_matrix!
 export momentum_distribution, cycle_length_distribution
 

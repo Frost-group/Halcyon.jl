@@ -164,6 +164,58 @@ function get_cycle(cfg::WormConfiguration, i::Int)
 end
 
 """
+    count_cycles(cfg::WormConfiguration) -> Int
+
+Count permutation cycles by reusing get_cycle().
+Each particle belongs to exactly one cycle.
+"""
+function count_cycles(cfg::WormConfiguration)
+    N = length(cfg.next)
+    visited = falses(N)
+    num_cycles = 0
+    
+    for i in 1:N
+        if !visited[i]
+            num_cycles += 1
+            cycle = get_cycle(cfg, i)  # Reuse existing function
+            for p in cycle
+                visited[p] = true
+            end
+        end
+    end
+    return num_cycles
+end
+
+"""
+    permutation_sign(cfg::WormConfiguration, sys::System) -> Int
+
+Return permutation sign based on quantum statistics:
+- Boltzmannons: Always +1 (distinguishable)
+- Bosons: Always +1 (symmetric)
+- Fermions: (-1)^(N - num_cycles) (antisymmetric)
+"""
+function permutation_sign(cfg::WormConfiguration, sys::System)
+    if sys.statistics == Boltzmannons || sys.statistics == Bosons
+        return 1
+    elseif sys.statistics == Fermions
+        N = length(cfg.next)
+        nc = count_cycles(cfg)
+        return iseven(N - nc) ? 1 : -1
+    else
+        error("Unknown quantum statistics: $(sys.statistics)")
+    end
+end
+
+# Convenience: permutation_sign without System (assumes Fermions)
+permutation_sign(cfg::WormConfiguration) = permutation_sign_fermion(cfg)
+
+function permutation_sign_fermion(cfg::WormConfiguration)
+    N = length(cfg.next)
+    nc = count_cycles(cfg)
+    return iseven(N - nc) ? 1 : -1
+end
+
+"""
     recenter!(cfg::WormConfiguration, i::Int, L::Float64)
 
 Shift polymer i so that bead 0 is within the fundamental cell [0, L)^D.
@@ -294,7 +346,7 @@ end
 
 External potential action for particle i between slices j and j+1.
 Uses trapezoidal rule (primitive factorization).
-""
+"""
 function get_external_action(cfg::WormConfiguration, sys::System, i::Int, j::Int)
     # Early exit for null potential
     if sys.V isa HarmonicPotential && sys.V.k == 0.0
