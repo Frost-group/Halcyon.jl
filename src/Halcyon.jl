@@ -4,32 +4,36 @@
 
 module Halcyon
 
-# Namespace is currently very dirty and everything will need to get (re)sorted
-# as it becomes clear where things should lie.
 include("potentials.jl")
-include("types.jl")
-#include("system.jl")
-include("PIMC.jl") # Path integrals for the win
-
-# Worm algorithm (Spada et al. 2022)
+include("types.jl")       # System, WormConfiguration, WormParams
 include("exact.jl")
-include("worm.jl")
+include("worm.jl")        # Worm algorithm (Spada et al. 2022)
 include("analysis.jl")
 
-export System, Path, localMove!, total_energy, energy_virial
-export AbstractPotential, ExternalPotential, PairPotential,
-    HarmonicPotential, DoubleWellPotential,
-    LennardJonesPotential, CoulombPotential, YukawaPotential,
-    HardSpherePotential, AzizPotential, NullPairPotential, cao_berne_ratio
+# Core types
+export System, WormConfiguration, WormParams
+export Sector, Z_SECTOR, G_SECTOR
 
-# Worm algorithm exports
-export Sector, Z_SECTOR, G_SECTOR, WormConfiguration, WormParams
+# Potentials
+export AbstractPotential, ExternalPotential, PairPotential
+export HarmonicPotential, DoubleWellPotential
+export LennardJonesPotential, CoulombPotential, YukawaPotential
+export HardSpherePotential, AzizPotential, NullPairPotential
+export cao_berne_ratio
+
+# Worm algorithm moves
 export translate!, redraw!, open!, close!, swap!, move_head!, move_tail!, worm_step!
-export energy_thermodynamic, energy_components, get_cycle, extract_extended_path, recenter!, get_bead, get_endpoint, total_winding, superfluid_fraction
-export radial_distribution, accumulate_density_matrix!, momentum_distribution, cycle_length_distribution
+
+# Estimators and analysis
+export energy_thermodynamic, energy_virial, energy_components
+export get_cycle, extract_extended_path, recenter!
+export get_bead, get_endpoint, total_winding, superfluid_fraction
+export radial_distribution, accumulate_density_matrix!
+export momentum_distribution, cycle_length_distribution
+
+# Exact solutions (for validation)
 export z1, E1_exact, thermal_wavelength, critical_temperature
 export β_from_λT_ratio, β_from_T_ratio, λT_over_L
 export jacobi_theta3, G1_Z1_ratio, Z_N, E_N_exact, E_thermodynamic_limit
 
 end # module
-

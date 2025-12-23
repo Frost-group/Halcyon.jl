@@ -3,49 +3,7 @@
 #      with periodic boundary conditions", Condens. Matter 2022, 7, 30
 # arXiv:2203.00010
 
-"""
-Sector indicator for worm algorithm.
-- Z_SECTOR: Diagonal configurations (closed polymers)
-- G_SECTOR: Off-diagonal configurations (worm present with head/tail)
-Ref: Spada et al. 2022, Section II.C
-"""
-@enum Sector Z_SECTOR G_SECTOR
-
-"""
-    WormConfiguration
-
-Worm algorithm configuration for PIMC with periodic boundary conditions.
-
-Ref: Spada et al. 2022, Section II.C
-
-Design (Option A): Implicit endpoint representation.
-- Stores beads 0 to M-1 in r[N, M, D].
-- Bead M (the endpoint) is derived from permutation, winding, and bead 0 positions.
-- In Z-sector: endpoint_i = r[next[i], 1, :] + w[i, :] * L
-- In G-sector: 
-    - if i == i_head: endpoint_i = r_c_head + w[i, :] * L
-    - else: endpoint_i = r[next[i], 1, :] + w[i, :] * L
-
-Fields:
-- sector::Sector: Z (diagonal/closed) or G (off-diagonal/worm present)
-- next::Vector{Int}: Forward permutation vector, next[i] = particle that polymer i connects to
-- prev::Vector{Int}: Backward permutation vector, prev[j] = particle that connects to polymer j
-- i_head::Int: Particle index of worm head (only meaningful in G-sector)
-- i_tail::Int: Particle index of worm tail = next[i_head] (meaningful in G-sector)
-- r_c_head::Vector{Float64}: Compact head coordinate in [0, L)^D
-- r::Array{Float64,3}: Bead positions [particle, bead, dimension], 1:M for beads 0:M-1
-- w::Matrix{Int}: Winding numbers [particle, dimension]
-"""
-@kwdef mutable struct WormConfiguration
-    sector::Sector = Z_SECTOR
-    next::Vector{Int}
-    prev::Vector{Int}
-    i_head::Int = 1
-    i_tail::Int = 1
-    r_c_head::Vector{Float64} = Float64[]
-    r::Array{Float64,3}
-    w::Matrix{Int}
-end
+# Type definitions (Sector, WormConfiguration, WormParams) are now in types.jl
 
 function WormConfiguration(sys::System)
     N, M, D, L = sys.N, sys.M, sys.D, sys.L
@@ -98,6 +56,7 @@ function Base.show(io::IO, cfg::WormConfiguration)
     end
     print(io, ")")
 end
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers for implicit endpoints and consistency
@@ -331,16 +290,48 @@ end
 # ═══════════════════════════════════════════════════════════════════════════════
 
 """
+    get_external_action(cfg, sys, i, j) -> Float64
+
+External potential action for particle i between slices j and j+1.
+Uses trapezoidal rule (primitive factorization).
+""
+function get_external_action(cfg::WormConfiguration, sys::System, i::Int, j::Int)
+    # Early exit for null potential
+    if sys.V isa HarmonicPotential && sys.V.k == 0.0
+        return 0.0
+    end
+
+    L, D, δτ = sys.L, sys.D, sys.τ
+
+    # Get beads j and j+1
+    r_j = zeros(D)
+    r_next = zeros(D)
+    for d in 1:D
+        r_j[d] = get_bead(cfg, i, j, d, L)
+        r_next[d] = get_bead(cfg, i, j + 1, d, L)
+    end
+
+    # Trapezoidal: 0.5 * δτ * (V(r_j) + V(r_{j+1}))
+    return 0.5 * δτ * (sys.V(r_j) + sys.V(r_next))
+end
+
+"""
     get_interaction_action(cfg, sys, i, j) -> Float64
 
-Interaction action for particle i at time slice j (between bead j and j+1)
-with all other particles.
-Ref: Spada et al. 2022, Eq. 57.
+Total action for particle i at time slice j (between bead j and j+1):
+- Pair potential with all other particles
+
+Ref: Spada et al. 2022, Eq. 57 (pair potential only).
 """
 function get_interaction_action(cfg::WormConfiguration, sys::System, i::Int, j::Int)
     N, L, D, M = sys.N, sys.L, sys.D, sys.M
+
+    # External potential contribution
+    action = get_external_action(cfg, sys, i, j)
+
+    # Pair potential: early exit if single particle or null
     if N == 1 || sys.U isa NullPairPotential
-        return 0.0
+        return action
     end
 
     λ, δτ = sys.λ, sys.τ
@@ -1086,8 +1077,23 @@ function energy_thermodynamic(cfg::WormConfiguration, sys::System)
         end
     end
 
-    # E = D*N/(2*δτ) - spring_sum/(4*λ*δτ^2*M) + 1/M * sum(dU/dδτ)
-    E = (D * N / (2 * δτ)) - (spring_sum / (4 * λ * δτ^2 * M)) + (int_contribution / M)
+    # External potential contribution
+    ext_contribution = 0.0
+    if !(sys.V isa HarmonicPotential && sys.V.k == 0.0)
+        for i in 1:N
+            for j in 0:M-1
+                r_vec = zeros(D)
+                for d in 1:D
+                    r_vec[d] = get_bead(cfg, i, j, d, L)
+                end
+                ext_contribution += sys.V(r_vec)
+            end
+        end
+    end
+
+    # E = D*N/(2*δτ) - spring_sum/(4*λ*δτ^2*M) + (int_contrib + ext_contrib)/M
+    E = (D * N / (2 * δτ)) - (spring_sum / (4 * λ * δτ^2 * M)) 
+        + (int_contribution / M) + (ext_contribution / M)
     return E
 end
 
@@ -1189,9 +1195,23 @@ function energy_virial(cfg::WormConfiguration, sys::System)
         end
     end
 
-    # Spada Eq. A2: E_vir/N = D/(2β) + term2/(4λδτ²NM) + term3/(2βN) + term4/(NM)
-    # term2 summed over N particles, term3 and term4 summed over pairs and slices
-    E = (D * N / (2 * β)) + (term2 / (4 * λ * δτ^2 * M)) + (term3 / (2 * β)) + (term4 / M)
+    # External potential for virial
+    term5 = 0.0
+    if !(sys.V isa HarmonicPotential && sys.V.k == 0.0)
+        for i in 1:N
+            for j in 0:M-1
+                r_vec = zeros(D)
+                for d in 1:D
+                    r_vec[d] = get_bead(cfg, i, j, d, L)
+                end
+                term5 += sys.V(r_vec)
+            end
+        end
+    end
+
+    # Spada Eq. A2 + external potential: E_vir/N = D/(2β) + term2/(4λδτ²NM) + term3/(2βN) + term4/(NM) + term5/(NM)
+    E = (D * N / (2 * β)) + (term2 / (4 * λ * δτ^2 * M)) 
+        + (term3 / (2 * β)) + (term4 / M) + (term5 / M)
     return E
 end
 
