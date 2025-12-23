@@ -11,7 +11,7 @@ using Distributed
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if nworkers() < 6
-    addprocs(8) # I dunno, use the efficiency cores so that early-finishing work gets backfilled?
+    addprocs(6) # I dunno, use the efficiency cores so that early-finishing work gets backfilled?
 end
 
 @everywhere using Halcyon, Statistics, Printf
@@ -28,9 +28,9 @@ end
     const λ = 6.0596 # Å² K
 
     # MC parameters
-    const EQUILIBRATION_STEPS = 500_000
-    const MEASUREMENT_STEPS = 10_000_000
-    const MEASURE_INTERVAL = 1000
+    const EQUILIBRATION_STEPS = 10_000
+    const MEASUREMENT_STEPS = 100_000
+    const MEASURE_INTERVAL = 100
 
     function run_T(T::Float64)
         β = 1.0 / T
@@ -51,7 +51,7 @@ end
         E_thermo_samples = Float64[]
         E_virial_samples = Float64[]
         rhos_samples = Float64[]
-        
+
         cycle_counts = zeros(Int, N)
         cycle_samples = 0
 
@@ -60,8 +60,8 @@ end
         for step in 1:MEASUREMENT_STEPS
             worm_step!(cfg, sys, params)
 
-            if step % MEASURE_INTERVAL == 0 
-                collect_sample=true # i.e. hit interval... now collect sample...
+            if step % MEASURE_INTERVAL == 0
+                collect_sample = true # i.e. hit interval... now collect sample...
             end
             if collect_sample && cfg.sector == Z_SECTOR # ...as soon as we hit Z-sector, worm reconnects
                 # 1. Thermodynamics
@@ -76,31 +76,39 @@ end
                         cycle = get_cycle(cfg, i)
                         m = length(cycle)
                         cycle_counts[m] += 1
-                        for p in cycle; visited[p] = true; end
+                        for p in cycle
+                            visited[p] = true
+                        end
                     end
                 end
                 cycle_samples += 1
-                collect_samepl=false # OK, we got our sample
+                collect_samepl = false # OK, we got our sample
+            end
+
+            if step % (MEASUREMENT_STEPS / 10) == 0
+                @printf("T = %.2f  %02d pc  done\n", T, Int(step * 100 / MEASUREMENT_STEPS))
             end
         end
 
+        # RETURN EARLY if no results; generally only happens short testing runs & fail to reconnect to Z
         if isempty(E_thermo_samples)
-            return (T=T, E_thermo=NaN, E_thermo_err=NaN, E_virial=NaN, E_virial_err=NaN, rhos=NaN, rhos_err=NaN, probs=zeros(40))
+            return (T=T, samples=0, E_thermo=NaN, E_thermo_err=NaN, E_virial=NaN, E_virial_err=NaN, rhos=NaN, rhos_err=NaN, probs=zeros(40))
         end
 
         probs = [(m * (cycle_counts[m] / cycle_samples)) / N for m in 1:40]
- 
+
         @printf("  Completed work package. T = %.2f K (M=%d)\n", T, M)
-       
+
         return (
-            T = T,
-            E_thermo = mean(E_thermo_samples) / N,
-            E_thermo_err = std(E_thermo_samples) / sqrt(length(E_thermo_samples)) / N,
-            E_virial = mean(E_virial_samples) / N,
-            E_virial_err = std(E_virial_samples) / sqrt(length(E_virial_samples)) / N,
-            rhos = mean(rhos_samples),
-            rhos_err = std(rhos_samples) / sqrt(length(rhos_samples)),
-            probs = probs
+            T=T,
+            samples=length(E_thermo_samples),
+            E_thermo=mean(E_thermo_samples) / N,
+            E_thermo_err=std(E_thermo_samples) / sqrt(length(E_thermo_samples)) / N,
+            E_virial=mean(E_virial_samples) / N,
+            E_virial_err=std(E_virial_samples) / sqrt(length(E_virial_samples)) / N,
+            rhos=mean(rhos_samples),
+            rhos_err=std(rhos_samples) / sqrt(length(rhos_samples)),
+            probs=probs
         )
     end
 end
@@ -113,8 +121,8 @@ function main()
     println("="^70)
 
     # Temperature sweep... 6 high-speed CPUs on my macbook; so make it a factor
-    temperatures = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 
-                    2.17, 2.4, 2.8, 3.2, 3.6, 4.0]
+    temperatures = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0,
+        2.17, 2.4, 2.8, 3.2, 3.6, 4.0]
 
     println("Starting parallel sweep of $(length(temperatures)) temperatures...")
     results = pmap(run_T, temperatures)
@@ -123,12 +131,12 @@ function main()
     # ═══════════════════════════════════════════════════════════════════════════════
     # Data Export
     # ═══════════════════════════════════════════════════════════════════════════════
-    
+
     open("Ceperley1995-TSweep.tsv", "w") do io
-        write(io, "# Temperature\tE_thermo\tE_thermo_err\tE_virial\tE_virial_err\trhos\trhos_err\tP1\tP2\tP4\tP8\n")
+        write(io, "# Temperature\tsamples\tE_thermo\tE_thermo_err\tE_virial\tE_virial_err\trhos\trhos_err\tP1\tP2\tP4\tP8\n")
         for r in results
-            @printf(io, "%.4f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\n", 
-                r.T, r.E_thermo, r.E_thermo_err, r.E_virial, r.E_virial_err, r.rhos, r.rhos_err,
+            @printf(io, "%.4f\t%d\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\n",
+                r.T, r.samples, r.E_thermo, r.E_thermo_err, r.E_virial, r.E_virial_err, r.rhos, r.rhos_err,
                 r.probs[1], r.probs[2], r.probs[4], r.probs[8])
         end
     end
@@ -137,9 +145,9 @@ function main()
     # ═══════════════════════════════════════════════════════════════════════════════
     # Plotting
     # ═══════════════════════════════════════════════════════════════════════════════
-    
+
     data_T = [r.T for r in results]
-    
+
     # 1. Energy Comparison
     @gp "reset"
     @gp :- "set title 'Energy Estimator Comparison (Ceperley Fig 13)'" "set grid" "set size square"
@@ -160,7 +168,7 @@ function main()
     @gp :- "set title 'Cycle Length Probability P_m(T) (Ceperley Fig 12)'"
     @gp :- "set xlabel 'T (K)'" "set ylabel 'P_m'" "set logscale y" "set yrange [1e-4:1.1]"
     @gp :- "set grid" "set size square"
-    
+
     for m in 1:40
         pm_data = [r.probs[m] for r in results]
         @gp :- data_T pm_data "w l lw 1 lc rgb 'gray' notitle"
