@@ -173,7 +173,7 @@ function count_cycles(cfg::WormConfiguration)
     N = length(cfg.next)
     visited = falses(N)
     num_cycles = 0
-    
+
     for i in 1:N
         if !visited[i]
             num_cycles += 1
@@ -1144,8 +1144,8 @@ function energy_thermodynamic(cfg::WormConfiguration, sys::System)
     end
 
     # E = D*N/(2*δτ) - spring_sum/(4*λ*δτ^2*M) + (int_contrib + ext_contrib)/M
-    E = (D * N / (2 * δτ)) - (spring_sum / (4 * λ * δτ^2 * M)) 
-        + (int_contribution / M) + (ext_contribution / M)
+    E = ((D * N / (2 * δτ)) - (spring_sum / (4 * λ * δτ^2 * M))
+         + (int_contribution / M) + (ext_contribution / M))
     return E
 end
 
@@ -1262,8 +1262,8 @@ function energy_virial(cfg::WormConfiguration, sys::System)
     end
 
     # Spada Eq. A2 + external potential: E_vir/N = D/(2β) + term2/(4λδτ²NM) + term3/(2βN) + term4/(NM) + term5/(NM)
-    E = (D * N / (2 * β)) + (term2 / (4 * λ * δτ^2 * M)) 
-        + (term3 / (2 * β)) + (term4 / M) + (term5 / M)
+    E = ((D * N / (2 * β)) + (term2 / (4 * λ * δτ^2 * M))
+         + (term3 / (2 * β)) + (term4 / M) + (term5 / M))
     return E
 end
 
