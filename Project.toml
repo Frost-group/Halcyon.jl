@@ -9,6 +9,7 @@ FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 Gnuplot = "dc211083-a33a-5b79-959f-2ff34033469d"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
@@ -17,6 +18,7 @@ BenchmarkTools = "1.6.3"
 FFTW = "1.10.0"
 ForwardDiff = "0.10.38"
 Gnuplot = "1.6.5"
+ProgressMeter = "1.11.0"
 StatsBase = "0.34.4"
 
 [extras]

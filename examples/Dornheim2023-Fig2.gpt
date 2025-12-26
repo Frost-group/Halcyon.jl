@@ -1,0 +1,23 @@
+# Dornheim2023-Fig2.gpt
+# Figure 2: Permutation Cycle Distribution P(l)
+# Ref: Dornheim et al. (2023), Figure 2
+
+set terminal pdfcairo enhanced font "Helvetica,10" size 5in,4in
+set output "Dornheim2023-Fig2.pdf"
+
+set title "Permutation Cycle Distribution (N=6, β=1, ξ=1)" font ",12"
+set xlabel "Cycle length m"
+set ylabel "P(m) · m / N"
+set xrange [0.5:6.5]
+set yrange [0:*]
+set grid
+set key top right
+
+plot \
+    "Dornheim2023_lambda0.0_cycles.tsv" using 1:2 with linespoints pt 7 lw 2 lc rgb "#e41a1c" title "λ=0.0", \
+    "Dornheim2023_lambda0.2_cycles.tsv" using 1:2 with linespoints pt 5 lw 2 lc rgb "#377eb8" title "λ=0.2", \
+    "Dornheim2023_lambda0.5_cycles.tsv" using 1:2 with linespoints pt 9 lw 2 lc rgb "#4daf4a" title "λ=0.5", \
+    "Dornheim2023_lambda1.0_cycles.tsv" using 1:2 with linespoints pt 11 lw 2 lc rgb "#c2c500" title "λ=1.0"
+
+set output
+

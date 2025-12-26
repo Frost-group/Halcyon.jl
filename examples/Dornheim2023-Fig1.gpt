@@ -1,0 +1,32 @@
+# Dornheim2023-Fig1.gpt
+# Figure 1: Energy vs ξ for different λ values
+# Ref: Dornheim et al. (2023), Figure 1
+# Virial estimator: solid colors | Thermodynamic estimator: desaturated/grey
+
+set terminal pdfcairo enhanced font "Helvetica,10" size 3in,5in
+set output "Dornheim2023-Fig1.pdf"
+
+set title "Total Energy E vs ξ (N=6, β=1)" font ",12"
+set xlabel "ξ"
+set ylabel "E"
+set xrange [-1.1:1.1]
+set yrange [15:40] # crazy values can throw this out
+set grid
+set key top right
+set arrow from 0, graph 0 to 0, graph 1 nohead lc rgb "black" lw 1.5
+
+# Virial estimator (saturated colors)
+# Thermodynamic estimator (desaturated/grey versions)
+
+plot \
+    "Dornheim2023_lambda0.0.tsv" using 1:4:5 with yerrorbars pt 6 ps 0.5 lc rgb "#b08080" title "λ=0.0 (thm)", \
+    "Dornheim2023_lambda0.2.tsv" using 1:4:5 with yerrorbars pt 4 ps 0.5 lc rgb "#8090a0" title "λ=0.2 (thm)", \
+    "Dornheim2023_lambda0.5.tsv" using 1:4:5 with yerrorbars pt 8 ps 0.5 lc rgb "#80a080" title "λ=0.5 (thm)", \
+    "Dornheim2023_lambda1.0.tsv" using 1:4:5 with yerrorbars pt 10 ps 0.5 lc rgb "#a0a080" title "λ=1.0 (thm)", \
+    "Dornheim2023_lambda0.0.tsv" using 1:2:3 with yerrorbars pt 7 ps 0.6 lc rgb "#e41a1c" title "λ=0.0 (vir)", \
+    "Dornheim2023_lambda0.2.tsv" using 1:2:3 with yerrorbars pt 5 ps 0.6 lc rgb "#377eb8" title "λ=0.2 (vir)", \
+    "Dornheim2023_lambda0.5.tsv" using 1:2:3 with yerrorbars pt 9 ps 0.6 lc rgb "#4daf4a" title "λ=0.5 (vir)", \
+    "Dornheim2023_lambda1.0.tsv" using 1:2:3 with yerrorbars pt 11 ps 0.6 lc rgb "#c2c500" title "λ=1.0 (vir)" 
+
+set output
+
