@@ -389,8 +389,6 @@ function get_interaction_action(cfg::WormConfiguration, sys::System, i::Int, j::
     λ, δτ = sys.λ, sys.τ
     a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
 
-    action = 0.0
-
     # BRANCH REMOVAL: Specialise the loop based on whether j+1 is an endpoint
     if j < M - 1
         # FAST PATH: k,j and k,j+1 are both internal beads (stored in cfg.r)
@@ -472,14 +470,17 @@ Used to optimize translate! move.
 """
 function get_interaction_action_external(cfg::WormConfiguration, sys::System, i::Int, j::Int, cycle_mask::AbstractVector{Bool})
     N, L, D, M = sys.N, sys.L, sys.D, sys.M
+
+    # Include external potential (trap moves with particles)
+    action = get_external_action(cfg, sys, i, j)
+
+    # Pair potential: early exit if single particle or null
     if N == 1 || sys.U isa NullPairPotential
-        return 0.0
+        return action
     end
 
     λ, δτ = sys.λ, sys.τ
     a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
-
-    action = 0.0
 
     if j < M - 1
         @inbounds for k in 1:N
