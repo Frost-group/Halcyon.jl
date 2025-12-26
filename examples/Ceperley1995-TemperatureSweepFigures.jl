@@ -28,9 +28,9 @@ end
     const λ = 6.0596 # Å² K
 
     # MC parameters. About half an hour for 12 sweeps with ~110k total moves
-    const EQUILIBRATION_STEPS = 10_000
-    const MEASUREMENT_STEPS = 100_000
-    const MEASURE_INTERVAL = 100
+    const EQUILIBRATION_STEPS = 500_000
+    const MEASUREMENT_STEPS = 2_000_000
+    const MEASURE_INTERVAL = 20
 
     function run_T(T::Float64)
         β = 1.0 / T
@@ -55,14 +55,9 @@ end
         cycle_counts = zeros(Int, N)
         cycle_samples = 0
 
-        collect_sample::Bool = false
-
         for step in 1:MEASUREMENT_STEPS
             worm_step!(cfg, sys, params)
 
-            if step % MEASURE_INTERVAL == 0
-                collect_sample = true # i.e. hit interval... now collect sample...
-            end
             if step % MEASURE_INTERVAL == 0 # whichever sector...
                 #collect_sample && cfg.sector == Z_SECTOR # ...as soon as we hit Z-sector, worm reconnects
                 # 1. Thermodynamics, only if in Z...
@@ -87,7 +82,6 @@ end
                     end
                 end
                 cycle_samples += 1
-                collect_samepl = false # OK, we got our sample
             end
 
             if step % (MEASUREMENT_STEPS / 10) == 0
