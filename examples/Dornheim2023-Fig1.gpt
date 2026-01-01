@@ -30,3 +30,8 @@ plot \
 
 set output
 
+set terminal pngcairo size 500,800 enhanced font 'Helvetica,14'
+set output "Dornheim2023-Fig1.png"
+replot
+
+

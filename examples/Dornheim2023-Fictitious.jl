@@ -164,8 +164,9 @@ function run_simulation(; N::Int=N_PARTICLES, β::Float64=β_DEFAULT, M::Int=M_D
         worm_step!(cfg, sys, params)
 
         if step % MEASURE_INTERVAL == 0 && cfg.sector == Z_SECTOR
-            push!(E_virial_samples, energy_virial(cfg, sys))
-            push!(E_thermo_samples, energy_thermodynamic(cfg, sys))
+            E_therm, E_vir = energy_estimators(cfg, sys)
+            push!(E_virial_samples, E_vir)
+            push!(E_thermo_samples, E_therm)
 
             n_cycles = count_cycles(cfg)
             N_pp = N - n_cycles

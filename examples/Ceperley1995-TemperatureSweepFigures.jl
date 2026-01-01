@@ -62,8 +62,9 @@ end
                 #collect_sample && cfg.sector == Z_SECTOR # ...as soon as we hit Z-sector, worm reconnects
                 # 1. Thermodynamics, only if in Z...
                 if cfg.sector == Z_SECTOR
-                    push!(E_thermo_samples, energy_thermodynamic(cfg, sys))
-                    push!(E_virial_samples, energy_virial(cfg, sys))
+                    Et, Ev = energy_estimators(cfg, sys)
+                    push!(E_thermo_samples, Et)
+                    push!(E_virial_samples, Ev)
                 end
 
                 push!(rhos_samples, superfluid_fraction(cfg, sys))

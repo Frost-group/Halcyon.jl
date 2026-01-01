@@ -26,7 +26,8 @@ export cao_berne_ratio
 export translate!, redraw!, open!, close!, swap!, move_head!, move_tail!, worm_step!
 
 # Estimators and analysis
-export energy_thermodynamic, energy_virial, energy_components
+export energy_estimators, energy_components
+export potential_derivative
 export get_cycle, extract_extended_path, recenter!
 export get_bead, get_endpoint, total_winding, superfluid_fraction
 export count_cycles, permutation_sign  # Fermion sign tracking

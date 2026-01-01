@@ -74,8 +74,9 @@ function run_simulation(M, N, β; verbose=true)
         worm_step!(cfg, sys, params)
         if step % MEASURE_INTERVAL == 0 && cfg.sector == Z_SECTOR
             push!(signs, permutation_sign(cfg, sys))
-            push!(E_thermo_samples, energy_thermodynamic(cfg, sys))
-            push!(E_virial_samples, energy_virial(cfg, sys))
+            Et, Ev = energy_estimators(cfg, sys)
+            push!(E_thermo_samples, Et)
+            push!(E_virial_samples, Ev)
         end
     end
 

@@ -1,106 +1,119 @@
 using Halcyon
 using BenchmarkTools
 using Printf
-using LinearAlgebra
 
 function run_benchmarks()
     # ═══════════════════════════════════════════════════════════════════════════════
-    # Benchmark Configurations
+    # Benchmark Configurations - Physically Relevant Setups
     # ═══════════════════════════════════════════════════════════════════════════════
-    
+
     cases = [
-        (name="Case A (Small Ideal)", N=2, M=16, U=NullPairPotential()),
-        (name="Case B (Large Ideal)", N=64, M=32, U=NullPairPotential()),
-        (name="Case C (Large Interacting)", N=64, M=64, U=HardSpherePotential(a=1.0))
+        # Small ideal gas - minimal test
+        (name="Case A: Small Ideal Gas", N=2, M=16, D=3, L=1.0,
+            V=HarmonicPotential(k=0.0), U=NullPairPotential()),
+
+        # Large ideal gas - scaling test  
+        (name="Case B: Large Ideal Gas", N=64, M=32, D=3, L=10.0,
+            V=HarmonicPotential(k=0.0), U=NullPairPotential()),
+
+        # Hard-sphere liquid - Cao-Berne test
+        (name="Case C: Hard-Sphere Liquid", N=64, M=64, D=3, L=20.0,
+            V=HarmonicPotential(k=0.0), U=HardSpherePotential(a=1.0)),
+
+        # Dornheim 2019: Harmonic trap + Coulomb (2D quantum dot)
+        (name="Case D: Harmonic Trap + Coulomb (Dornheim)", N=6, M=100, D=2, L=5.0,
+            V=HarmonicPotential(k=0.5), U=CoulombPotential(g=-0.5)),
     ]
-    
+
     params = WormParams(C=1.0, j_max=16, j_max_open=16, j_max_swap=16, r_max=0.5)
-    
+
     for case in cases
-        println("\n" * "=" ^ 80)
+        println("\n" * "="^80)
         println("Benchmarking: $(case.name)")
-        println("N=$(case.N), M=$(case.M), Interaction=$(typeof(case.U))")
-        println("=" ^ 80)
-        
-        # Setup system and configuration
-        # Fix density n=0.1 for interacting, L=1.0 for small ideal
-        L = (case.U isa NullPairPotential) ? 1.0 : (case.N / 0.1)^(1/3)
-        sys = System(case.M, case.N, m=1.0, D=3, β=1.0, V=HarmonicPotential(k=0.0), U=case.U, λ=0.5, L=L)
+        println("N=$(case.N), M=$(case.M), D=$(case.D)")
+        println("="^80)
+
+        sys = System(case.M, case.N; m=1.0, D=case.D, β=1.0,
+            V=case.V, U=case.U, λ=0.5, L=case.L)
         cfg = WormConfiguration(sys)
-        
-        # Benchmarking individual moves
-        # Note: some moves only work in specific sectors or under certain conditions.
-        # We'll force sectors where necessary.
-        
+
         println("\n--- Monte Carlo Moves ---")
-        
-        # translate! (works in both sectors)
         print("translate!: ")
         @btime translate!($cfg, $sys, $params)
-        
-        # redraw! (works in both sectors)
         print("redraw!:    ")
         @btime redraw!($cfg, $sys, $params)
-        
-        # For open/close/swap/head/tail, we need to be in G-sector or handle transitions
-        # We'll benchmark them in their "natural" sectors if possible.
-        
-        # open! (Z-sector)
         cfg.sector = Z_SECTOR
         print("open!:      ")
         @btime open!($cfg, $sys, $params)
-        
-        # close! (G-sector)
-        # Note: close! might transition to Z-sector, we force it back for benchmarking
-        print("close!:     ")
-        @btime begin
-            $cfg.sector = G_SECTOR
-            $cfg.i_head = 1
-            $cfg.i_tail = $cfg.next[$cfg.i_head]
-            $cfg.r_c_head .= $cfg.r[1, 1, :]
-            close!($cfg, $sys, $params)
-        end
-        
-        # swap! (G-sector)
-        print("swap!:      ")
-        @btime begin
-            $cfg.sector = G_SECTOR
-            $cfg.i_head = 1
-            $cfg.i_tail = $cfg.next[$cfg.i_head]
-            swap!($cfg, $sys, $params)
-        end
-        
-        # move_head! (G-sector)
-        print("move_head!: ")
-        @btime begin
-            $cfg.sector = G_SECTOR
-            $cfg.i_head = 1
-            move_head!($cfg, $sys, $params)
-        end
-        
-        # move_tail! (G-sector)
-        print("move_tail!: ")
-        @btime begin
-            $cfg.sector = G_SECTOR
-            $cfg.i_head = 1
-            $cfg.i_tail = $cfg.next[$cfg.i_head]
-            move_tail!($cfg, $sys, $params)
-        end
-        
-        println("\n--- Energy Estimators (Z-sector) ---")
+
+        println("\n--- Energy Estimator ---")
         cfg.sector = Z_SECTOR
-        
-        print("thermodynamic: ")
-        @btime energy_thermodynamic($cfg, $sys)
-        
-        print("virial:        ")
-        @btime energy_virial($cfg, $sys)
-        
-        println("\n--- Aggregate Step ---")
-        print("worm_step!:    ")
-        @btime worm_step!($cfg, $sys, $params)
+        @btime energy_estimators($cfg, $sys)
+    end
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # Scaling Benchmarks: Hard-Sphere (Cao-Berne)
+    # ═══════════════════════════════════════════════════════════════════════════════
+    println("\n" * "="^80)
+    println("SCALING BENCHMARKS: energy_estimators (Hard-Sphere)")
+    println("="^80)
+
+    # Scaling with N (fixed M=32)
+    println("\n--- N-scaling (M=32, D=3, HS a=1.0) ---")
+    println(rpad("N", 6) * " | " * rpad("Time", 12))
+    println("-"^25)
+
+    for N_val in [1, 10, 32, 64, 128]
+        L = max(5.0, (N_val)^(1 / 3) * 3.0)  # Scale L with N
+        sys = System(32, N_val; m=1.0, D=3, β=1.0,
+            V=HarmonicPotential(k=0.0), U=HardSpherePotential(a=1.0), λ=0.5, L=L)
+        cfg = WormConfiguration(sys)
+        energy_estimators(cfg, sys)  # Warmup
+        t = @belapsed energy_estimators($cfg, $sys)
+        @printf("%-6d | %s\n", N_val, pretty_time(t * 1e9))
+    end
+
+    # Scaling with M (fixed N=10)
+    println("\n--- M-scaling (N=10, D=3, HS a=1.0) ---")
+    println(rpad("M", 6) * " | " * rpad("Time", 12))
+    println("-"^25)
+
+    for M_val in [16, 32, 64, 128, 256]
+        sys = System(M_val, 10; m=1.0, D=3, β=1.0,
+            V=HarmonicPotential(k=0.0), U=HardSpherePotential(a=1.0), λ=0.5, L=10.0)
+        cfg = WormConfiguration(sys)
+        energy_estimators(cfg, sys)  # Warmup
+        t = @belapsed energy_estimators($cfg, $sys)
+        @printf("%-6d | %s\n", M_val, pretty_time(t * 1e9))
+    end
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # Scaling Benchmarks: Harmonic + Coulomb (Dornheim setup)
+    # ═══════════════════════════════════════════════════════════════════════════════
+    println("\n" * "="^80)
+    println("SCALING BENCHMARKS: energy_estimators (Harmonic+Coulomb)")
+    println("="^80)
+
+    # Scaling with N (fixed M=50)
+    println("\n--- N-scaling (M=50, D=2, Harmonic+Coulomb) ---")
+    println(rpad("N", 6) * " | " * rpad("Time", 12))
+    println("-"^25)
+
+    for N_val in [2, 4, 6, 10, 20]
+        sys = System(50, N_val; m=1.0, D=2, β=1.0,
+            V=HarmonicPotential(k=0.5), U=CoulombPotential(g=-0.5), λ=0.5, L=5.0)
+        cfg = WormConfiguration(sys)
+        energy_estimators(cfg, sys)  # Warmup
+        t = @belapsed energy_estimators($cfg, $sys)
+        @printf("%-6d | %s\n", N_val, pretty_time(t * 1e9))
     end
 end
 
-run_benchmarks()
+function pretty_time(ns)
+    ns < 1e3 && return @sprintf("%.2f ns", ns)
+    ns < 1e6 && return @sprintf("%.2f μs", ns / 1e3)
+    ns < 1e9 && return @sprintf("%.2f ms", ns / 1e6)
+    return @sprintf("%.2f s", ns / 1e9)
+end
 
+run_benchmarks()
