@@ -1,7 +1,0 @@
-[deps]
-BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
-Halcyon = "ea65e02c-02a1-4f91-acc1-0c78ab1071d7"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[sources]
-Halcyon = {path = ".."}
