@@ -33,10 +33,14 @@ export get_bead, get_endpoint, total_winding, superfluid_fraction
 export count_cycles, permutation_sign  # Fermion sign tracking
 export radial_distribution, accumulate_density_matrix!
 export momentum_distribution, cycle_length_distribution
+export particle_cycle_lengths, permutation_pl_weights, permutation_pcf_weights
+export permutation_pcf_uncorrelated, permutation_pl_sum_rule
+export accumulate_trap_radial_2d!, finalize_trap_radial_2d, blocking_mean_stderr
 
 # Exact solutions (for validation)
 export z1, E1_exact, thermal_wavelength, critical_temperature
 export β_from_λT_ratio, β_from_T_ratio, λT_over_L
 export jacobi_theta3, G1_Z1_ratio, Z_N, E_N_exact, E_thermodynamic_limit
+export ideal_fermion_permutation_P_l
 
 end # module

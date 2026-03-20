@@ -1,5 +1,7 @@
 # src/analysis.jl - Post-processing analysis utilities for PIMC configurations
 
+using Statistics
+
 """
     radial_distribution(cfg::WormConfiguration, sys::System; nbins=100, r_max=nothing) -> (r, gr)
 
@@ -212,6 +214,173 @@ function cycle_length_distribution(cfg::WormConfiguration, sys::System)
 
     return lengths, probs
 end
+
+"""
+    particle_cycle_lengths(cfg::WormConfiguration) -> Vector{Int}
+
+Length-N vector: `result[i]` is the length of the permutation cycle containing particle `i`.
+"""
+function particle_cycle_lengths(cfg::WormConfiguration)
+    N = size(cfg.r, 1)
+    lens = zeros(Int, N)
+    visited = falses(N)
+    @inbounds for i in 1:N
+        if !visited[i]
+            cyc = get_cycle(cfg, i)
+            m = length(cyc)
+            for p in cyc
+                lens[p] = m
+                visited[p] = true
+            end
+        end
+    end
+    return lens
+end
+
+"""
+    permutation_pl_weights(cfg::WormConfiguration)
+
+Per-configuration contribution to Dornheim et al. P(l): for each cycle length l,
+add (number of l-cycles)/N. Average over MC samples gives P(l) (bosonic measure).
+Ref: their Eq. (p).
+"""
+function permutation_pl_weights(cfg::WormConfiguration)
+    N = size(cfg.r, 1)
+    w = zeros(Float64, N)
+    visited = falses(N)
+    @inbounds for i in 1:N
+        if !visited[i]
+            cyc = get_cycle(cfg, i)
+            m = length(cyc)
+            1 ≤ m ≤ N && (w[m] += 1.0 / N)
+            for p in cyc
+                visited[p] = true
+            end
+        end
+    end
+    return w
+end
+
+"""
+    permutation_pcf_weights(cfg::WormConfiguration)
+
+Matrix W with W[l,k] the per-sample contribution to P(l,k) from Dornheim et al.,
+using the particle-pair definition
+
+P(l,k) = 2/(l k N(N-1)) ⟨ ∑_{i<j} δ(i,l) δ(j,k) ⟩.
+
+Ref: first displayed equation in their permutation-cycle correlation subsection.
+"""
+function permutation_pcf_weights(cfg::WormConfiguration)
+    N = size(cfg.r, 1)
+    W = zeros(Float64, N, N)
+    N < 2 && return W
+    lens = particle_cycle_lengths(cfg)
+    inv_den = 1.0 / (N * (N - 1))
+    @inbounds for l in 1:N, k in 1:N
+        c = 0
+        for i in 1:N-1, j in i+1:N
+            if lens[i] == l && lens[j] == k
+                c += 1
+            end
+        end
+        W[l, k] = 2 * c * inv_den / (l * k)
+    end
+    return W
+end
+
+"""
+    permutation_pcf_uncorrelated(P_l::AbstractVector{<:Real}) -> Matrix{Float64}
+
+Uncorrelated joint estimate P_u(l,k) = P(l) P(k) (same paper).
+"""
+function permutation_pcf_uncorrelated(P_l::AbstractVector{<:Real})
+    N = length(P_l)
+    [P_l[l] * P_l[k] for l in 1:N, k in 1:N]
+end
+
+"""
+    permutation_pl_sum_rule(w::AbstractVector) -> Float64
+
+For Dornheim `P(l)` weights from `permutation_pl_weights`, ∑_l l·P(l) = 1 (identity on cycle cover).
+"""
+function permutation_pl_sum_rule(w::AbstractVector{<:Real})
+    s = 0.0
+    @inbounds for l in eachindex(w)
+        s += l * w[l]
+    end
+    return s
+end
+
+"""
+    accumulate_trap_radial_2d!(hist_b, hist_sf, cfg, sys, S::Integer; dr, r_max, origin=(0.0, 0.0))
+
+Add one Z-sector sample: boson counts in `hist_b`, fermion numerator counts in `hist_sf` (each bead in bin contributes `S`).
+Requires `sys.D == 2`. Bins cover `[0,r_max)` with width `dr`; `length(hist_b) ≥ ceil(r_max/dr)`.
+Coordinates are measured from `origin` (default corner `(0,0)`; use `(L/2,L/2)` for a centred trap in lab frame).
+"""
+function accumulate_trap_radial_2d!(hist_b::AbstractVector{Float64}, hist_sf::AbstractVector{Float64},
+                                    cfg::WormConfiguration, sys::System, S::Integer;
+                                    dr::Float64, r_max::Float64, origin::Tuple{Float64,Float64}=(0.0, 0.0))
+    sys.D == 2 || throw(ArgumentError("accumulate_trap_radial_2d! requires sys.D == 2"))
+    nbins = length(hist_b)
+    length(hist_sf) == nbins || throw(ArgumentError("histogram lengths must match"))
+    N, M = sys.N, sys.M
+    o1, o2 = origin
+    Sf = Float64(S)
+    @inbounds for j in 1:M, i in 1:N
+        x = cfg.r[i, j, 1] - o1
+        y = cfg.r[i, j, 2] - o2
+        r = hypot(x, y)
+        r >= r_max && continue
+        b = floor(Int, r / dr) + 1
+        (b >= 1 && b <= nbins) || continue
+        hist_b[b] += 1.0
+        hist_sf[b] += Sf
+    end
+    return nothing
+end
+
+"""
+    finalize_trap_radial_2d(hist_b, hist_sf, sum_S, n_meas, N, M, dr) -> (r, n_bose, n_fermi)
+
+Convert accumulated histograms to 2D number density n(r) [∫2π r n(r)dr ≈ N]: bosonic from time average;
+fermionic ratio estimator ⟨·⟩′ using `sum_S = ∑ S_m` over the same measurements. `n_fermi` is `NaN` if `sum_S` is negligible.
+"""
+function finalize_trap_radial_2d(hist_b::AbstractVector{Float64}, hist_sf::AbstractVector{Float64},
+                               sum_S::Float64, n_meas::Int, N::Int, M::Int, dr::Float64)
+    nbins = length(hist_b)
+    r = [(i - 0.5) * dr for i in 1:nbins]
+    n_bose = zeros(nbins)
+    n_fermi = fill(NaN, nbins)
+    inv_nm = 1.0 / (N * M)
+    inv_m = 1.0 / max(n_meas, 1)
+    @inbounds for i in 1:nbins
+        ri = max(r[i], 0.5 * dr)
+        inv_shell = 1.0 / (2π * ri * dr)
+        n_bose[i] = hist_b[i] * inv_m * inv_nm * inv_shell
+        if abs(sum_S) > 1e-12
+            n_fermi[i] = (hist_sf[i] / sum_S) * inv_nm * inv_shell
+        end
+    end
+    return r, n_bose, n_fermi
+end
+
+"""
+    blocking_mean_stderr(x::AbstractVector{<:Real}; n_blocks=16) -> (mean, stderr)
+
+Split `x` into contiguous blocks; stderr from block means (simple blocking error).
+"""
+function blocking_mean_stderr(x::AbstractVector{<:Real}; n_blocks::Int=16)
+    n = length(x)
+    n < 2 && return (float(mean(x)), NaN)
+    bs = max(1, n ÷ n_blocks)
+    nb = n ÷ bs
+    nb < 2 && return (float(mean(x)), NaN)
+    mus = [mean(@view x[(k-1)*bs+1:k*bs]) for k in 1:nb]
+    return mean(mus), std(mus) / sqrt(length(mus))
+end
+
 """
     smooth_momentum_distribution(rho1_grid::AbstractArray, sys::System; 
                                 k_max=5.0, nk_bins=200, radial_bins=500) -> (k, nk)

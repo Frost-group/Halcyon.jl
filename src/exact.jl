@@ -207,6 +207,27 @@ function Z_N(N::Int, β::Float64, L::Float64, λ::Float64;
 end
 
 """
+    ideal_fermion_permutation_P_l(l, N, β, L, λ; cache=nothing, nmax=50) -> Float64
+
+Semi-analytical P(l) for ideal spin-polarised fermions (PIMC bosonic measure), 3D periodic box.
+Matches Dornheim et al. Eqs. (definition_pl)–(p): P(l)=⟨ν_l⟩/N with ν_l the number of l-cycles, i.e.
+
+P(l) = Z₁(lβ) Z_{N-l}(β) / (l N Z_N(β))
+
+Their displayed ratio Z₁ Z_{N-l}/(l Z_N) is ⟨ν_l⟩; the extra 1/N is required for P(l) and gives ∑_l l P(l)=1.
+
+Uses canonical ideal-boson `Z_N` (Spada Eq. 23) as Z_B in the permutation-cycle literature.
+"""
+function ideal_fermion_permutation_P_l(l::Int, N::Int, β::Float64, L::Float64, λ::Float64;
+                                       cache::Union{Nothing,Dict}=nothing, nmax::Int=50)
+    (l < 1 || l > N) && return 0.0
+    Ztot = Z_N(N, β, L, λ; cache=cache, nmax=nmax)
+    Z1l = z1(l * β, L, λ; nmax=nmax)
+    Zrem = N == l ? 1.0 : Z_N(N - l, β, L, λ; cache=cache, nmax=nmax)
+    return Z1l * Zrem / (l * N * Ztot)
+end
+
+"""
     E_N_exact(N, β, L, λ; nmax=50) -> Float64
 
 Exact internal energy for N non-interacting bosons.
