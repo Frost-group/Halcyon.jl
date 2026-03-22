@@ -8,6 +8,7 @@ include("potentials.jl")
 include("types.jl")       # System, WormConfiguration, WormParams
 include("exact.jl")
 include("worm.jl")        # Worm algorithm (Spada et al. 2022)
+include("PermutationFamily.jl") # following DeBois 2014, or at leat what I think they did
 include("analysis.jl")
 
 # Core types
@@ -33,14 +34,22 @@ export get_bead, get_endpoint, total_winding, superfluid_fraction
 export count_cycles, permutation_sign  # Fermion sign tracking
 export radial_distribution, accumulate_density_matrix!
 export momentum_distribution, cycle_length_distribution
+
+# Dornheim 2019 Permutations reproduction code, very messy currently
 export particle_cycle_lengths, permutation_pl_weights, permutation_pcf_weights
 export permutation_pcf_uncorrelated, permutation_pl_sum_rule
 export accumulate_trap_radial_2d!, finalize_trap_radial_2d, blocking_mean_stderr
-
 # Exact solutions (for validation)
 export z1, E1_exact, thermal_wavelength, critical_temperature
 export β_from_λT_ratio, β_from_T_ratio, λT_over_L
 export jacobi_theta3, G1_Z1_ratio, Z_N, E_N_exact, E_thermodynamic_limit
 export ideal_fermion_permutation_P_l
+
+# Permutation families (conjugacy / permutation cycles)
+export integer_partition_count_table, permutation_family_count
+export permutation_family_lambda, permutation_family_index
+export permutation_family_lambda_from_rank
+export C_permutation_sector
+export DensePermutationFamilyStats, observe_permutation_family!
 
 end # module
