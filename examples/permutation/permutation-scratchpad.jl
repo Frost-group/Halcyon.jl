@@ -11,7 +11,7 @@ function basic_test()
     P = integer_partition_count_table(N)
     λ = permutation_family_lambda(N, [2, 1, 1])
     @show permutation_family_index(λ, P, N)
-    @show permutation_family_multiplicity_for_display(λ)
+    @show C_permutation_sector(λ)
     println("scratchpad: OK (import Halcyon + permutation_family_*).")
 end
 
@@ -21,7 +21,7 @@ function print_permutation_families(N)
     for k in 1:permutation_family_count(N, P)
         λ = permutation_family_lambda_from_rank(k, N, P)
         @show λ
-        @show C = permutation_family_multiplicity_for_display(λ)
+        @show C = C_permutation_sector(λ)
         @show sum(C[i]*i for i in 1:length(C)) == N
         push!(indices, permutation_family_index(λ, P, N))
         @show indices[end]
