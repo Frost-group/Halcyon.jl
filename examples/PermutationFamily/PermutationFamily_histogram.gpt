@@ -1,0 +1,8 @@
+# count  family_index  P_hat  λ (nonzero parts, descending)
+set logscale y
+set xlabel "Permutation family index"
+set ylabel "Probability"
+p "PermutationFamily_histogram.dat" u 2:3
+
+
+
