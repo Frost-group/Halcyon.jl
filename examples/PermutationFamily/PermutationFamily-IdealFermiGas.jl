@@ -44,8 +44,8 @@ end
 default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
-function run_family_histogram(; N::Int=20, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                             l_fixed::Int=1, equil::Int=60_000, steps::Int=20_000_000,
+function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
+                             l_fixed::Int=1, equil::Int=100_000, steps::Int=200_000_000,
                              measure_every::Int=25)
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
@@ -58,6 +58,8 @@ function run_family_histogram(; N::Int=20, θ::Float64=0.5, r_s::Float64=2.0, M:
     end
 
     acc = DensePermutationFamilyStats(N)
+    println("Allocated Dense PermutationFamily N=$(N) Permutation families: $(acc.n_families)  Size(bytes): $(Base.summarysize(acc)) Size(GB): $(Base.summarysize(acc) / 1024^3)")
+    
     acc_pl = zeros(Float64, N)
     acc_pcf_col = zeros(Float64, N)
     n_z = 0
