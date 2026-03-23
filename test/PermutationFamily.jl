@@ -41,8 +41,11 @@ end
             λ = permutation_family_lambda(N, cycle_lengths)
             idx = permutation_family_index(λ, P, N)
 
-            t = @belapsed permutation_family_index($λ, $P, $N) seconds=0.25
-            println("permutation_family_index N=$N: idx=$idx, λ=$λ, elapsed=$(round(t * 1e6; digits=2)) μs")
+            println("Benmarking... permutation_family_index(λ=$λ, ..., N=$N)")
+            b=@benchmark permutation_family_index($λ, $P, $N) seconds=0.25
+            show(stdout, MIME("text/plain"), b)
+            println()
+
         end
     end
 end

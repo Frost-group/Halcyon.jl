@@ -101,19 +101,19 @@ end
 
 """Uses a reverse-lexigraphic ordering of canonical partition (largest first, like European format or something?). Follows Matehmatica IntegerPartitions order.
 """
-function recursive_partition_rank(partition::AbstractVector{Int}, n::Int, m::Int, P::Matrix{Int})
+function recursive_partition_rank(partition::AbstractVector{Int}, n::Int, m::Int, P::Matrix{Int}; start_idx::Int=1)
     n == 0 && return 1
     
-    a1 = partition[1]
+    a1 = partition[start_idx]
     hi = min(n, m)
     s = 0
     for b in (a1 + 1):hi
         s += P[n - b + 1, b + 1]
     end
-    if length(partition) == 1
+    if length(partition) == start_idx
         return s + 1
     end
-    return s + recursive_partition_rank(partition[2:end], n - a1, a1, P)
+    return s + recursive_partition_rank(partition, n - a1, a1, P, start_idx=start_idx+1)
 end
 
 """
