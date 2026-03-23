@@ -2,6 +2,10 @@
 set logscale y
 set xlabel "Permutation family index"
 set ylabel "Probability"
+
+set yrange [1e-10:1e-1] # same as DeBois S2 axis
+set xrange [0:10143]
+
 p "PermutationFamily_histogram.dat" u 2:3
 
 

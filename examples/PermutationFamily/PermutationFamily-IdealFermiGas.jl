@@ -3,6 +3,7 @@
 using Halcyon
 using Printf
 using ProgressMeter
+using Optim
 
 # Agreement with Dornheim 2019 Permutation setup code
 """Wigner–Seitz density n = 3/(4π r_s³) in 3D (atomic units)."""
@@ -45,7 +46,7 @@ default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
 function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                             l_fixed::Int=1, equil::Int=100_000, steps::Int=200_000_000,
+                             l_fixed::Int=1, equil::Int=100_000, steps::Int=20_000_000,
                              measure_every::Int=25)
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
@@ -57,8 +58,8 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
         worm_step!(cfg, sys, params)
     end
 
-    acc = DensePermutationFamilyStats(N)
-    println("Allocated Dense PermutationFamily N=$(N) Permutation families: $(acc.n_families)  Size(bytes): $(Base.summarysize(acc)) Size(GB): $(Base.summarysize(acc) / 1024^3)")
+    PermFamHisto = DensePermutationFamilyStats(N)
+    println("Allocated Dense PermutationFamily N=$(N) Permutation families: $(PermFamHisto.n_families)  Size(bytes): $(Base.summarysize(PermFamHisto)) Size(GB): $(Base.summarysize(PermFamHisto) / 1024^3)")
     
     acc_pl = zeros(Float64, N)
     acc_pcf_col = zeros(Float64, N)
@@ -69,7 +70,7 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
         if t % measure_every == 0 && cfg.sector == Z_SECTOR
             λ_vec = permutation_family_lambda(cfg)
             W = permutation_pcf_weights(cfg)
-            observe_permutation_family!(acc, λ_vec, 0.0)
+            observe_permutation_family!(PermFamHisto, λ_vec, 0.0)
 
             w_pl = permutation_pl_weights(cfg)
             acc_pl .+= w_pl
@@ -82,23 +83,96 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
     P_mc = acc_pl ./ n_z
     col = acc_pcf_col ./ n_z
     Pu_col = [P_mc[l_fixed] * P_mc[k] for k in 1:N]
-    n_tot = sum(acc.count)
+    n_tot = sum(PermFamHisto.count)
 
     println(@sprintf("# Ideal fermions  N=%d  θ=%g  p(N)=%d  Z-samples=%d  (l_fixed=%d)\n",
-                     N, θ, acc.n_families, n_z, l_fixed))
+                     N, θ, PermFamHisto.n_families, n_z, l_fixed))
 
     hits = Tuple{Int,Int}[]
-    for k in 1:acc.n_families
-        c = acc.count[k]
+    for k in 1:PermFamHisto.n_families
+        c = PermFamHisto.count[k]
         c > 0 && push!(hits, (k, c))
     end
     sort!(hits; by=x -> (-x[2], x[1]))
+
+# I must not fear the overfit.
+# Fear is the gradient-killer.
+
+    # --- MaxEnt (Mean-Field) DuBois fit ---
+    println("Fitting MaxEnt MeanField model...")
+    logM = zeros(Float64, PermFamHisto.n_families)
+    C_matrix = zeros(Int, PermFamHisto.n_families, N)
+    for k in 1:PermFamHisto.n_families
+        λk = permutation_family_lambda_from_rank(k, N, PermFamHisto.P)
+        C_k = C_permutation_sector(λk)
+        C_matrix[k, :] .= C_k
+        
+        logM[k] = sum(log.(1:N)) # log(N!)
+        for l in 1:N
+            if C_k[l] > 0
+                logM[k] -= sum(log.(1:C_k[l])) + C_k[l] * log(l)
+            end
+        end
+    end
+    
+    empirical_p = Float64.(PermFamHisto.count) ./ n_tot
+    
+    # nega log-likelihood baby
+    function f_nll(theta_reduced)
+        theta = vcat(0.0, theta_reduced)
+        log_unnorm = logM .+ C_matrix * theta
+        max_val = maximum(log_unnorm)
+        logZ = log(sum(exp.(log_unnorm .- max_val))) + max_val
+        return logZ - sum(empirical_p .* log_unnorm) + 1e-4 * sum(theta_reduced.^2)
+    end
+
+    # explicit gradient to avoid autodiff
+    #  just <C_l-model> - <C_l-monte-carlo> 
+    #   regularisation (little bid added on) required in case of no MC examples
+    function g_nll!(G, theta_reduced)
+        theta = vcat(0.0, theta_reduced)
+        log_unnorm = logM .+ C_matrix * theta
+        max_val = maximum(log_unnorm)
+        unnorm = exp.(log_unnorm .- max_val)
+        q_model = unnorm ./ sum(unnorm)
+        
+        model_C = q_model' * C_matrix
+        emp_C = empirical_p' * C_matrix
+        G .= (model_C .- emp_C)[2:end] .+ 2e-4 .* theta_reduced
+    end
+    
+    # optimimise over log-likelihood 
+    res = optimize(f_nll, g_nll!, zeros(N-1), LBFGS())
+    theta_fit = vcat(0.0, Optim.minimizer(res))
+    log_unnorm = logM .+ C_matrix * theta_fit # for all permutation familes
+    logZ = log(sum(exp.(log_unnorm .- maximum(log_unnorm)))) + maximum(log_unnorm) # normalise with explicit sum over permutation families to get Z
+    q_model = exp.(log_unnorm .- logZ) # evaluate all model probs
+    
+    # write out fit / residuals
+    open("PermutationFamily_histogram_fit.dat", "w") do io
+        println(io, "# count  family_index  P_hat  P_model  log_residual  λ (nonzero parts, descending)")
+        for (k, c) in hits
+            p_hat = c / n_tot
+            p_m = q_model[k]
+            res_val = p_hat > 0 ? log(p_hat / p_m) : 0.0 # units nats 
+            
+            λk = permutation_family_lambda_from_rank(k, N, PermFamHisto.P)
+            r = findfirst(iszero, λk)
+            head = isnothing(r) ? λk : λk[1:(r - 1)]
+            @printf(io, "%8d  %8d  %.5e  %.5e  %8.5f  %s\n", c, k, p_hat, p_m, res_val, string(collect(head)))
+        end
+    end
+    println("Fitted theta(=log P_l): ", round.(theta_fit, digits=3))
+    println("Fitted P_l: ", round.(exp.(theta_fit), digits=3))
+
+    kl_div = sum(p_hat .* log.(p_hat ./ p_m) for (p_hat, p_m) in zip(empirical_p, q_model) if p_hat > 0)
+    @printf("KL(empirical || model) = %.5f nats\n", kl_div)
 
     open("PermutationFamily_histogram.dat", "w") do io
         println(io, "# count  family_index  P_hat  λ (nonzero parts, descending)")
         for (k, c) in hits
             p_hat = c / n_tot
-            λk = permutation_family_lambda_from_rank(k, N, acc.P)
+            λk = permutation_family_lambda_from_rank(k, N, PermFamHisto.P)
             r = findfirst(iszero, λk)
             head = isnothing(r) ? λk : λk[1:(r - 1)]
             @printf(io, "%8d  %8d  %.5e  %s\n", c, k, p_hat, string(collect(head)))
