@@ -1,5 +1,6 @@
 using Test
 using Halcyon
+using BenchmarkTools
 
 # Not very sophisticant tests currently
 
@@ -26,6 +27,22 @@ using Halcyon
 
     @test C_permutation_sector(λ211) == [2, 1, 0, 0]
 
-    bad = [2, 1, 0, 1]
-    @test_throws ArgumentError permutation_family_index(bad, P, N)
+#    bad = [2, 1, 0, 1] # got rid of this guard check for performance, so don't screw up!
+#    @test_throws ArgumentError permutation_family_index(bad, P, N)
+end
+
+@testset "PermutationFamilyBenchmark" begin
+    for N in (12, 24)
+        P = integer_partition_count_table(N)
+
+        # so consider non-permuting case, which we want to be be fast (happens a lot!)
+        #  and then a very permutting case, which is less common, so accept slow down 
+        for cycle_lengths in [fill(1, N), fill(4, N ÷ 4)]
+            λ = permutation_family_lambda(N, cycle_lengths)
+            idx = permutation_family_index(λ, P, N)
+
+            t = @belapsed permutation_family_index($λ, $P, $N) seconds=0.25
+            println("permutation_family_index N=$N: idx=$idx, λ=$λ, elapsed=$(round(t * 1e6; digits=2)) μs")
+        end
+    end
 end

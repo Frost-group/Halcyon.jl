@@ -168,14 +168,15 @@ defn), but thought that standarising on λ representation and reading enough
 Wikipedia/Mathematica/Scary books on S_n group to get a dense object was more satisfying. 
 
 """
-mutable struct DensePermutationFamilyStats
+ struct DensePermutationFamilyStats
     N::Int
     P::Matrix{Int}
     n_families::Int
     count::Vector{Int64}
     estimator::Vector{Float64}
 end
-# FIXME: should make this unmutable & concrete/isbits, but I forget how?
+# FIXME: now immutable struct, but still have count & estimator as mutable vectors?
+#  Not sure if this is still a problem? Or whether once instantiated, Julia kmows everything there is to know 
 
 function DensePermutationFamilyStats(N::Int)
     P = integer_partition_count_table(N)
@@ -190,6 +191,5 @@ function observe_permutation_family!(acc::DensePermutationFamilyStats, λ::Vecto
     acc.count[k] += 1
     t = acc.count[k]
     acc.estimator[k] += (x - acc.estimator[k]) / t
-    return acc
 end
 
