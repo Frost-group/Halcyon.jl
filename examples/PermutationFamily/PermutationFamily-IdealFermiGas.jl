@@ -47,7 +47,7 @@ default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
 function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                             l_fixed::Int=1, equil::Int=100_000, steps::Int=2_000_000,
+                             l_fixed::Int=1, equil::Int=100_000, steps::Int=200_000_000,
                              measure_every::Int=5)
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
