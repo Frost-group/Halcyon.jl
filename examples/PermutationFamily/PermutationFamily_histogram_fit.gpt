@@ -1,0 +1,21 @@
+# count  family_index  P_hat  P_mult  P_p2  P_map  P_full  λ (nonzero parts, descending)
+
+set xlabel "Permutation family index"
+set ylabel "Probability"
+
+set logscale y
+set yrange [1e-10:1e-1] # same as DeBois S2 axis
+
+set xrange [0:10143]
+
+# sorted by count... so 0: for count ordering
+p "PermutationFamily_histogram_fit.dat" u 2:3 title "MC" lc black, \
+  '' u 2:5 title "Fit:DuBois-p2/Kappa" w d, \
+  '' u 2:6 title "Fit:MAP-on-p2" w d,\
+    '' u 2:7 title "Fit:FullMaxEnt" w d 
+
+set terminal pngcairo size 800,600 enhanced font 'Helvetica,14'
+set output "PermutationFamily_histogram_fit.png"
+replot
+
+

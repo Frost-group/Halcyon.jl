@@ -4,6 +4,7 @@ using Halcyon
 using Printf
 using ProgressMeter
 using Optim
+using LinearAlgebra: dot
 
 # Agreement with Dornheim 2019 Permutation setup code
 """Wigner–Seitz density n = 3/(4π r_s³) in 3D (atomic units)."""
@@ -46,8 +47,8 @@ default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
 function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                             l_fixed::Int=1, equil::Int=100_000, steps::Int=20_000_000,
-                             measure_every::Int=25)
+                             l_fixed::Int=1, equil::Int=100_000, steps::Int=2_000_000,
+                             measure_every::Int=5)
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
     sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ)
@@ -98,75 +99,184 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
 # I must not fear the overfit.
 # Fear is the gradient-killer.
 
-    # --- MaxEnt (Mean-Field) DuBois fit ---
-    println("Fitting MaxEnt MeanField model...")
+    # --- Shared setup: log-multiplicity and cycle-count matrix ---
     logM = zeros(Float64, PermFamHisto.n_families)
     C_matrix = zeros(Int, PermFamHisto.n_families, N)
     for k in 1:PermFamHisto.n_families
         λk = permutation_family_lambda_from_rank(k, N, PermFamHisto.P)
         C_k = C_permutation_sector(λk)
         C_matrix[k, :] .= C_k
-        
-        logM[k] = sum(log.(1:N)) # log(N!)
+        logM[k] = sum(log.(1:N))
         for l in 1:N
-            if C_k[l] > 0
-                logM[k] -= sum(log.(1:C_k[l])) + C_k[l] * log(l)
-            end
+            C_k[l] > 0 && (logM[k] -= sum(log.(1:C_k[l])) + C_k[l] * log(l))
         end
     end
-    
     empirical_p = Float64.(PermFamHisto.count) ./ n_tot
-    
-    # nega log-likelihood baby
-    function f_nll(theta_reduced)
-        theta = vcat(0.0, theta_reduced)
-        log_unnorm = logM .+ C_matrix * theta
-        max_val = maximum(log_unnorm)
-        logZ = log(sum(exp.(log_unnorm .- max_val))) + max_val
-        return logZ - sum(empirical_p .* log_unnorm) + 1e-4 * sum(theta_reduced.^2)
+
+    # helpers
+    function normalised_q(theta)
+        lu = logM .+ C_matrix * theta
+        mx = maximum(lu)
+        exp.(lu .- mx .- log(sum(exp.(lu .- mx))))
+    end
+    function kl(p, q)
+        s = 0.0
+        for i in eachindex(p)
+            p[i] > 0 && (s += p[i] * log(p[i] / q[i]))
+        end
+        s
     end
 
-    # explicit gradient to avoid autodiff
-    #  just <C_l-model> - <C_l-monte-carlo> 
-    #   regularisation (little bid added on) required in case of no MC examples
-    function g_nll!(G, theta_reduced)
-        theta = vcat(0.0, theta_reduced)
-        log_unnorm = logM .+ C_matrix * theta
-        max_val = maximum(log_unnorm)
-        unnorm = exp.(log_unnorm .- max_val)
-        q_model = unnorm ./ sum(unnorm)
-        
-        model_C = q_model' * C_matrix
-        emp_C = empirical_p' * C_matrix
-        G .= (model_C .- emp_C)[2:end] .+ 2e-4 .* theta_reduced
+    # --- (0) Infinite-temperature limit (degeneracy only) ---
+    # Q(k) ∝ M_k. 
+    # Without quantum exchange penalties (β→0), sectors appear purely by their
+    #  combinatorial degeneracy in S_N.
+    q_mult = normalised_q(zeros(N))
+    @printf("KL  Infinite-T (degeneracy-only)    = %.5f nats\n", kl(empirical_p, q_mult))
+    println("  Q_mult: ", zeros(N))
+
+    # --- (1) Phenomenological one-parameter extension (DuBois-like) ---
+    # Penalise non-trivial exchanges: θ_l = -κ(l-1) with θ₁=0.
+    # The sector log-probability is log M_k - κ(N-K), where K = ∑_l C_l is the number of cycles.
+    # (N-K) is the minimum number of transpositions required to form the permutation from the identity.
+    # We fit the scalar pair-exchange penalty κ by minimising the negative log-likelihood.
+    n_minus_K = Float64[N - sum(C_matrix[k, :]) for k in 1:PermFamHisto.n_families]
+    
+    # f_nll: Loss function (negative log-likelihood) in nats.
+    function nll_p2(κ_vec)
+        κ = κ_vec[1]
+        lu = logM .- κ .* n_minus_K
+        mx = maximum(lu)
+        logZ = log(sum(exp.(lu .- mx))) + mx
+        return logZ - dot(empirical_p, lu)
     end
     
-    # optimimise over log-likelihood 
-    res = optimize(f_nll, g_nll!, zeros(N-1), LBFGS())
-    theta_fit = vcat(0.0, Optim.minimizer(res))
-    log_unnorm = logM .+ C_matrix * theta_fit # for all permutation familes
-    logZ = log(sum(exp.(log_unnorm .- maximum(log_unnorm)))) + maximum(log_unnorm) # normalise with explicit sum over permutation families to get Z
-    q_model = exp.(log_unnorm .- logZ) # evaluate all model probs
+    res_p2 = optimize(nll_p2, [0.0], NelderMead())
+    κ_hat = Optim.minimizer(res_p2)[1]
+    theta_p2 = [-(l - 1) * κ_hat for l in 1:N]
+    q_p2 = normalised_q(theta_p2)
+    @printf("KL  1-param (κ=%.4f, p₂=%.4f)        = %.5f nats\n", κ_hat, exp(-κ_hat), kl(empirical_p, q_p2))
+    println("  θ_p2: ", round.(theta_p2, digits=2))
+
+    # --- (2) MAP hybrid (DuBois-regularised MaxEnt) ---
+    # We fit N-1 parameters θ_₂ ... θ_N, but regularise them towards the DuBois 1-parameter 
+    # baseline rather than zero. We use a flat ridge penalty (Gaussian prior) on the deviations:
+    #   δ_l = θ_l - θ_l^DuBois  ~ N(0, τ₀²)
+    # 
+    # For small l (where MC data is abundant), the NLL gradient overpowers the prior, allowing 
+    # the model to perfectly fit the empirical histogram structure.
+    # For large l (where MC data is zero), the NLL gradient pushes the probability to zero (this is what we used to do),
+    # but the prior then pushes it back smoothly to the physical(?) DuBois exponential decay.
+    τ₀ = 1.0
     
-    # write out fit / residuals
+    # f_map: Loss function (negative log-likelihood + log-prior penalty) in nats.
+    function f_map(delta_reduced)
+        # Pad δ₁=0 (gauge choice), then add corrections to the 1-parameter baseline
+        delta = vcat(0.0, delta_reduced)
+        theta = theta_p2 .+ delta
+        
+        # Unnormalised log-probabilities for all p(N) sectors
+        lu = logM .+ C_matrix * theta
+        
+        # Log-sum-exp trick for the normalisation constant log(Z)
+        mx = maximum(lu)
+        logZ = log(sum(exp.(lu .- mx))) + mx
+        
+        # Flat L2 ridge penalty on the deviation from DuBois baseline
+        reg = sum(delta[l]^2 for l in 2:N) / (2 * τ₀^2)
+        
+        # Loss = -<log Q>_P̂ + log Z + prior penalty
+        return logZ - dot(empirical_p, lu) + reg
+    end
+    
+    # g_map!: Gradient of the MAP loss for L-BFGS. 
+    function g_map!(G, delta_reduced)
+        delta = vcat(0.0, delta_reduced)
+        theta = theta_p2 .+ delta
+        
+        # Recompute unnormalised log-probs to get the current model distribution Q
+        lu = logM .+ C_matrix * theta
+        mx = maximum(lu)
+        unnorm = exp.(lu .- mx)
+        q = unnorm ./ sum(unnorm)
+        
+        # Expected cycle counts under model (Q) vs empirical data (P̂)
+        model_C = q' * C_matrix
+        emp_C = empirical_p' * C_matrix
+        
+        # Gradient = NLL residual + derivative of the flat ridge penalty
+        G .= (model_C .- emp_C)[2:end] .+ [delta[l] / τ₀^2 for l in 2:N]
+    end
+    
+    res_map = optimize(f_map, g_map!, zeros(N - 1), LBFGS())
+    delta_fit = vcat(0.0, Optim.minimizer(res_map))
+    theta_map = theta_p2 .+ delta_fit
+    q_map = normalised_q(theta_map)
+    @printf("KL  MAP hybrid (τ₀=%.2f)        = %.5f nats\n", τ₀, kl(empirical_p, q_map))
+    println("  θ_map: ", round.(theta_map, digits=2))
+
+    # --- (3) Full MaxEnt (unconstrained cycle-length penalties) ---
+    # The exponential family Q(k) ∝ M_k exp(∑ C_l θ_l) is the 
+    # unique distribution that maximises entropy subject to matching the expected cycle counts
+    # <C_l>_Q to the empirical averages <C_l>_P̂.
+    # 
+    # Inductive bias: Unlike the MAP model, there is NO physical inductive bias here. 
+    # We fit N-1 parameters θ_₂ ... θ_N entirely independently.
+    #  
+    # weak isotropic L2 regularisation (1e-4) as numerical safeguard ONLY against collapse 
+    # for long cycle lengths that are completely absent in the MC data (preventing θ_l → -∞).
+
+    # Basic testing on UEG with 10^6 moves clearly showed unphysically large tails (-67 nats vs. -100 for the 33 cycle) c.f. the DeBois model 
+    
+    # f_nll: Loss function (NLL + weak L2) in nats.
+    function f_nll(theta_reduced)
+        # Pad θ₁=0 (gauge choice)
+        theta = vcat(0.0, theta_reduced)
+        
+        # Unnormalised log-probabilities
+        lu = logM .+ C_matrix * theta
+        
+        # Log-sum-exp trick for normalisation
+        mx = maximum(lu)
+        logZ = log(sum(exp.(lu .- mx))) + mx
+        
+        # Loss = -<log Q>_P̂ + log Z + weak isotropic L2 penalty
+        return logZ - dot(empirical_p, lu) + 1e-4 * sum(theta_reduced .^ 2)
+    end
+    
+    # g_nll!: Gradient of NLL + weak L2 for L-BFGS.
+    function g_nll!(G, theta_reduced)
+        theta = vcat(0.0, theta_reduced)
+        
+        # Current model distribution Q
+        lu = logM .+ C_matrix * theta
+        mx = maximum(lu)
+        unnorm = exp.(lu .- mx)
+        q = unnorm ./ sum(unnorm)
+        
+        # Gradient is exactly the MaxEnt matching condition: <C_l>_Q - <C_l>_P̂
+        G .= ((q' * C_matrix) .- (empirical_p' * C_matrix))[2:end] .+ 2e-4 .* theta_reduced
+    end
+    
+    res_full = optimize(f_nll, g_nll!, zeros(N - 1), LBFGS())
+    theta_fit = vcat(0.0, Optim.minimizer(res_full))
+    q_model = normalised_q(theta_fit)
+    @printf("KL  full MaxEnt                 = %.5f nats\n", kl(empirical_p, q_model))
+    println("  θ_full: ", round.(theta_fit, digits=2))
+
+    # write fit residuals for ALL sectors (including unobserved ones)
     open("PermutationFamily_histogram_fit.dat", "w") do io
-        println(io, "# count  family_index  P_hat  P_model  log_residual  λ (nonzero parts, descending)")
-        for (k, c) in hits
+        println(io, "# count  family_index  P_hat  P_mult  P_p2  P_map  P_full  λ (nonzero parts, descending)")
+        for k in 1:PermFamHisto.n_families
+            c = PermFamHisto.count[k]
             p_hat = c / n_tot
-            p_m = q_model[k]
-            res_val = p_hat > 0 ? log(p_hat / p_m) : 0.0 # units nats 
-            
             λk = permutation_family_lambda_from_rank(k, N, PermFamHisto.P)
             r = findfirst(iszero, λk)
             head = isnothing(r) ? λk : λk[1:(r - 1)]
-            @printf(io, "%8d  %8d  %.5e  %.5e  %8.5f  %s\n", c, k, p_hat, p_m, res_val, string(collect(head)))
+            @printf(io, "%8d  %8d  %.5e  %.5e  %.5e  %.5e  %.5e  %s\n",
+                    c, k, p_hat, q_mult[k], q_p2[k], q_map[k], q_model[k], string(collect(head)))
         end
     end
-    println("Fitted theta(=log P_l): ", round.(theta_fit, digits=3))
-    println("Fitted P_l: ", round.(exp.(theta_fit), digits=3))
-
-    kl_div = sum(p_hat .* log.(p_hat ./ p_m) for (p_hat, p_m) in zip(empirical_p, q_model) if p_hat > 0)
-    @printf("KL(empirical || model) = %.5f nats\n", kl_div)
 
     open("PermutationFamily_histogram.dat", "w") do io
         println(io, "# count  family_index  P_hat  λ (nonzero parts, descending)")
@@ -188,6 +298,9 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
             @printf(io, "%3d  %.5e  %.5e  %.5e\n", k, col[k], Pu_col[k], p_ex)
         end
     end
+
+    # OK, calc some estimators ... ?
+
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
