@@ -47,7 +47,7 @@ default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
 function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                             l_fixed::Int=1, equil::Int=100_000, steps::Int=200_000_000,
+                             l_fixed::Int=1, equil::Int=100_000, steps::Int=20_000_000,
                              measure_every::Int=5)
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
@@ -275,6 +275,14 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
             head = isnothing(r) ? λk : λk[1:(r - 1)]
             @printf(io, "%8d  %8d  %.5e  %.5e  %.5e  %.5e  %.5e  %s\n",
                     c, k, p_hat, q_mult[k], q_p2[k], q_map[k], q_model[k], string(collect(head)))
+        end
+    end
+
+    # write theta models for comparison
+    open("PermutationFamily_theta_models.dat", "w") do io
+        println(io, "# permutation_size  θ_mult  θ_p2  θ_map  θ_full")
+        for k in 1:N
+            @printf(io, "%8d  %.5e  %.5e  %.5e  %.5e\n", k, zeros(N)[k], theta_p2[k], theta_map[k], theta_fit[k])
         end
     end
 
