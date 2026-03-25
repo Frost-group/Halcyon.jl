@@ -120,22 +120,22 @@ end
 # -----------------------------------------------------------------------------
 
 Base.@kwdef struct CoulombPotential <: PairPotential
-    g::Float64 = 1.0
+    g::Float64 = 1.0 # Note: positive g is REPULSIVE here if V = +g/r
 end
 
-(U::CoulombPotential)(r_norm::Float64) = r_norm == 0.0 ? 0.0 : -U.g / r_norm
+(U::CoulombPotential)(r_norm::Float64) = r_norm == 0.0 ? 0.0 : U.g / r_norm
 (U::CoulombPotential)(r::AbstractVector{<:Real}) = begin
     r′ = norm(r)
-    r′ == 0.0 ? 0.0 : -U.g / r′
+    r′ == 0.0 ? 0.0 : U.g / r′
 end
 
 Base.show(io::IO, obj::CoulombPotential) = print(io, "CoulombPotential(g=$(obj.g))")
 
 function potential_derivative(U::CoulombPotential, r::AbstractVector{<:Real})
-    # V(r) = -g/|r|, so ∇V = g*r/|r|³
+    # V(r) = g/|r|, so ∇V = -g*r/|r|³
     r_norm = norm(r)
     r_norm == 0.0 && return zero(r)
-    return (U.g / r_norm^3) * r
+    return (-U.g / r_norm^3) * r
 end
 
 

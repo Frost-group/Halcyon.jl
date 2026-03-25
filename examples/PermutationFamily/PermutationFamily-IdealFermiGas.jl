@@ -47,11 +47,12 @@ default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
 function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                             l_fixed::Int=1, equil::Int=100_000, steps::Int=20_000_000,
+                             l_fixed::Int=1, equil::Int=100_000, steps::Int=2_000_000,
                              measure_every::Int=5)
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
-    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ)
+    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=CoulombPotential())
+    # pair = CoulombPotential for HEG
     params = default_worm_params(sys)
     cfg = WormConfiguration(sys)
 
@@ -95,6 +96,34 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
         c > 0 && push!(hits, (k, c))
     end
     sort!(hits; by=x -> (-x[2], x[1]))
+
+    # --- Diagnostics ---
+    function print_histogram_diagnostics(hits, n_tot, N, P_matrix)
+        n_unique = length(hits)
+        println("\n=== Histogram Diagnostics ===")
+        println("Total Z-samples     : ", n_tot)
+        println("Unique families hit : ", n_unique, " (", round(100 * n_unique / permutation_family_count(N, P_matrix), digits=2), "% of state space)")
+        
+        # Empirical entropy (gives a sense of "effective" number of states explored)
+        emp_entropy = 0.0
+        for (k, c) in hits
+            p = c / n_tot
+            emp_entropy -= p * log(p)
+        end
+        println("Empirical Entropy   : ", round(emp_entropy, digits=2), " nats (Effective states: ", round(exp(emp_entropy), digits=1), ")")
+
+        println("\nTop 5 permutation-families:")
+        for i in 1:min(5, n_unique)
+            k, c = hits[i]
+            λk = permutation_family_lambda_from_rank(k, N, P_matrix)
+            r = findfirst(iszero, λk)
+            head = isnothing(r) ? λk : λk[1:(r - 1)]
+            @printf("  %2d. Count: %7d (%5.1f%%) | λ = %s\n", i, c, 100*c/n_tot, string(collect(head)))
+        end
+        println("=============================\n")
+    end
+
+    print_histogram_diagnostics(hits, n_tot, N, PermFamHisto.P)
 
 # I must not fear the overfit.
 # Fear is the gradient-killer.
@@ -312,5 +341,6 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    run_family_histogram(; l_fixed=1)
+    #run_family_histogram(r_s=1.0, θ=0.125 ; l_fixed=1) # DuBois Table 1, Weak Coupling / High Density
+    run_family_histogram(r_s=10.0, θ=0.125 ; l_fixed=1) # DuBois Table 1, Strong Coupling / Low Density
 end

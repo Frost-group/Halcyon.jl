@@ -16,6 +16,8 @@ p "PermutationFamily_histogram_fit.dat" u 0:3 title "MC" lc black, \
   '' u 0:6 title "Fit:MAP-on-p2" w d lc rgb "orange" #,\
 #    '' u 2:7 title "Fit:FullMaxEnt" w d 
 
+pause -1 "Rescale / relocate with mouse. Enter to dump PNG; Cmd-c to escape."
+
 set terminal pngcairo size 800,600 enhanced font 'Helvetica,14'
 set output "PermutationFamily_histogram_fit.png"
 replot
