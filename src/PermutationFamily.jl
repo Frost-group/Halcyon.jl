@@ -100,6 +100,12 @@ end
 
 
 """Uses a reverse-lexigraphic ordering of canonical partition (largest first, like European format or something?). Follows Matehmatica IntegerPartitions order.
+
+This seems to follow DeBois; from looking at the comparitive figures in the SI. 
+
+BUT it seems a bit stupid, as it ranks stuff lexigraphically, it goes like [6], [5,1], [4,2], etc. so has quite common cycles spread through the index. 
+
+I had a thought to re-order this to be more physical, by following the kind DeBois reasoning that larger cycles should be rare so pushing them to the end of the list, meaning like 99.9% of the MC moves fit in the L1 cache (till you go superfluid!)
 """
 function recursive_partition_rank(partition::AbstractVector{Int}, n::Int, m::Int, P::Matrix{Int}; start_idx::Int=1)
     n == 0 && return 1
