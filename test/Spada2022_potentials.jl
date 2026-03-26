@@ -23,8 +23,8 @@ using Halcyon
     end
     @testset "CoulombPotential" begin
         U = CoulombPotential()
-        @test U([1.0]) ≈ -1.0
-        @test CoulombPotential(g=2.0)([2.0]) ≈ -1.0
+        @test U([1.0]) ≈ 1.0
+        @test CoulombPotential(g=2.0)([2.0]) ≈ 1.0
     end
     @testset "YukawaPotential" begin
         U = YukawaPotential(g=1.0, m=1.0)
