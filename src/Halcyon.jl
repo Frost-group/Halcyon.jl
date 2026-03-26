@@ -9,6 +9,7 @@ include("types.jl")       # System, WormConfiguration, WormParams
 include("exact.jl")
 include("worm.jl")        # Worm algorithm (Spada et al. 2022)
 include("PermutationFamily.jl") # following DeBois 2014, or at leat what I think they did
+include("LSTMPermutationModel.jl") # autoregressive LSTM for permutation sector probabilities
 include("analysis.jl")
 
 # Core types
@@ -55,6 +56,7 @@ export DensePermutationFamilyStats, observe_permutation_family!
 export log_multiplicities, cycle_count_matrix, empirical_probabilities
 # Permutation sector models
 export AbstractPermutationModel, MultiplicityModel, DuBoisModel, MaxEntModel, MAPHybridModel
+export LSTMPermutationModel
 export fit, probabilities, kl_divergence
 
 end # module
