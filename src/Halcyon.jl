@@ -51,5 +51,10 @@ export permutation_family_lambda, permutation_family_index
 export permutation_family_lambda_from_rank
 export C_permutation_sector
 export DensePermutationFamilyStats, observe_permutation_family!
+# Accessors on DensePermutationFamilyStats
+export log_multiplicities, cycle_count_matrix, empirical_probabilities
+# Permutation sector models
+export AbstractPermutationModel, MultiplicityModel, DuBoisModel, MaxEntModel, MAPHybridModel
+export fit, probabilities, kl_divergence
 
 end # module
