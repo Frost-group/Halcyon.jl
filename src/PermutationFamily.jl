@@ -25,18 +25,18 @@
 function integer_partition_count_table(nmax::Int)
     P = zeros(Int, nmax + 1, nmax + 1)
     for m in 0:nmax
-        P[1, m + 1] = 1
+        P[1, m+1] = 1
     end
     for n in 1:nmax
         for m in 1:nmax
-            P[n + 1, m + 1] = P[n + 1, m] + (n >= m ? P[n - m + 1, m + 1] : 0)
+            P[n+1, m+1] = P[n+1, m] + (n >= m ? P[n-m+1, m+1] : 0)
         end
     end
     return P
 end
 
 """Number of permutation families (conjugacy classes) for `N` particles: p(N)."""
-permutation_family_count(N::Int, P::Matrix{Int}) = P[N + 1, N + 1]
+permutation_family_count(N::Int, P::Matrix{Int}) = P[N+1, N+1]
 
 """
     permutation_family_lambda(N, cycle_lengths) -> Vector{Int}
@@ -63,11 +63,11 @@ function permutation_family_lambda(cfg::WormConfiguration)
     N = size(cfg.r, 1) # bit of a hack? 
     λ = zeros(Int, N) # emptied, so we can accumulate as we stripe
     visited = falses(N)
-    
+
     @inbounds for i in 1:N
         if !visited[i]
             cyc = get_cycle(cfg, i)
-            λ[i]=length(cyc) # stash dah number
+            λ[i] = length(cyc) # stash dah number
             for p in cyc
                 visited[p] = true
             end
@@ -110,17 +110,17 @@ I had a thought to re-order this to be more physical, by following the kind DeBo
 """
 function recursive_partition_rank(partition::AbstractVector{Int}, n::Int, m::Int, P::Matrix{Int}; start_idx::Int=1)
     n == 0 && return 1
-    
+
     a1 = partition[start_idx]
     hi = min(n, m)
     s = 0
-    for b in (a1 + 1):hi
-        s += P[n - b + 1, b + 1]
+    for b in (a1+1):hi
+        s += P[n-b+1, b+1]
     end
     if length(partition) == start_idx
         return s + 1
     end
-    return s + recursive_partition_rank(partition, n - a1, a1, P, start_idx=start_idx+1)
+    return s + recursive_partition_rank(partition, n - a1, a1, P, start_idx=start_idx + 1)
 end
 
 """
@@ -130,14 +130,14 @@ Dense index into `1:permutation_family_count(N,P)` via recursive ranking of cano
 """
 function permutation_family_index(λ::Vector{Int}, P::Matrix{Int}, N::Int)
     r = findfirst(iszero, λ)
-    partition = isnothing(r) ? view(λ, 1:N) : view(λ, 1:(r - 1))
+    partition = isnothing(r) ? view(λ, 1:N) : view(λ, 1:(r-1))
     recursive_partition_rank(partition, N, N, P)
 end
 
 function recursive_partition_unrank(n::Int, m::Int, k::Int, P::Matrix{Int})
     n == 0 && return Int[]
     for b in min(n, m):-1:1
-        cnt = P[n - b + 1, b + 1]
+        cnt = P[n-b+1, b+1]
         if k > cnt
             k -= cnt
             continue
@@ -175,7 +175,7 @@ defn), but thought that standarising on λ representation and reading enough
 Wikipedia/Mathematica/Scary books on S_n group to get a dense object was more satisfying. 
 
 """
- struct DensePermutationFamilyStats
+struct DensePermutationFamilyStats
     N::Int
     P::Matrix{Int}
     n_families::Int
@@ -187,17 +187,18 @@ end
 
 function DensePermutationFamilyStats(N::Int)
     P = integer_partition_count_table(N)
-    pn = P[N + 1, N + 1]
+    pn = P[N+1, N+1]
     DensePermutationFamilyStats(N, P, pn, zeros(Int64, pn), zeros(Float64, pn))
 end
 
 """ Just a mock to play with the code appriach currently"""
-function observe_permutation_family!(acc::DensePermutationFamilyStats, λ::Vector{Int}, x::Float64)
+function observe_permutation_family!(acc::DensePermutationFamilyStats, λ::Vector{Int}, E::Float64)
     N = acc.N
     k = permutation_family_index(λ, acc.P, N)
-    acc.count[k] += 1
-    t = acc.count[k]
-    acc.estimator[k] += (x - acc.estimator[k]) / t
+
+    acc.count[k] += 1       # add one to raw count
+    acc.estimator[k] += E   # add one to running total (nb: removed running average, as remembered IEEE Float additions are lossless (and FAST!))
+    # THEREFORE, you need to divide by hte raw counts to get the estimate
 end
 
 # ===================================================================
@@ -292,10 +293,10 @@ struct MAPHybridModel{P<:AbstractPermutationModel} <: AbstractPermutationModel
     θ::Vector{Float64}
 end
 
-Base.show(io::IO, m::MultiplicityModel)  = print(io, "MultiplicityModel(N=$(length(m.θ)), θ=$(round.(m.θ, digits=2)))")
-Base.show(io::IO, m::DuBoisModel)        = print(io, "DuBoisModel(N=$(length(m.θ)), κ=$(round(m.κ, digits=4)), p₂=$(round(exp(-m.κ), digits=4)), θ=$(round.(m.θ, digits=2)))")
-Base.show(io::IO, m::MaxEntModel)        = print(io, "MaxEntModel(N=$(length(m.θ)), l2_reg=$(m.l2_reg), θ=$(round.(m.θ, digits=2)))")
-Base.show(io::IO, m::MAPHybridModel)     = print(io, "MAPHybridModel(N=$(length(m.θ)), τ₀=$(round(m.τ₀, digits=2)), prior=$(m.prior), θ=$(round.(m.θ, digits=2)))")
+Base.show(io::IO, m::MultiplicityModel) = print(io, "MultiplicityModel(N=$(length(m.θ)), θ=$(round.(m.θ, digits=2)))")
+Base.show(io::IO, m::DuBoisModel) = print(io, "DuBoisModel(N=$(length(m.θ)), κ=$(round(m.κ, digits=4)), p₂=$(round(exp(-m.κ), digits=4)), θ=$(round.(m.θ, digits=2)))")
+Base.show(io::IO, m::MaxEntModel) = print(io, "MaxEntModel(N=$(length(m.θ)), l2_reg=$(m.l2_reg), θ=$(round.(m.θ, digits=2)))")
+Base.show(io::IO, m::MAPHybridModel) = print(io, "MAPHybridModel(N=$(length(m.θ)), τ₀=$(round(m.τ₀, digits=2)), prior=$(m.prior), θ=$(round.(m.θ, digits=2)))")
 
 # ===================================================================
 # Shared helpers
@@ -382,7 +383,7 @@ function fit(::Type{MaxEntModel}, stats::DensePermutationFamilyStats; l2_reg::Fl
         mx = maximum(lu)
         unnorm = exp.(lu .- mx)
         q = unnorm ./ sum(unnorm)
-        G .= ((q' * Cmat) .- (emp_p' * Cmat))[2:end] .+ 2 * l2_reg .* θr
+        G .= ((q'*Cmat).-(emp_p'*Cmat))[2:end] .+ 2 * l2_reg .* θr
     end
 
     res = optimize(f, g!, zeros(N - 1), LBFGS())
@@ -392,7 +393,7 @@ end
 
 """Fit deviations δ₂…δ_N from a prior model's θ via L-BFGS with Gaussian ridge."""
 function fit(::Type{MAPHybridModel}, stats::DensePermutationFamilyStats;
-             prior::AbstractPermutationModel, τ₀::Float64=1.0)
+    prior::AbstractPermutationModel, τ₀::Float64=1.0)
     N = stats.N
     logM = log_multiplicities(stats)
     Cmat = cycle_count_matrix(stats)
@@ -416,7 +417,7 @@ function fit(::Type{MAPHybridModel}, stats::DensePermutationFamilyStats;
         mx = maximum(lu)
         unnorm = exp.(lu .- mx)
         q = unnorm ./ sum(unnorm)
-        G .= ((q' * Cmat) .- (emp_p' * Cmat))[2:end] .+ [δ[ℓ] / τ₀^2 for ℓ in 2:N]
+        G .= ((q'*Cmat).-(emp_p'*Cmat))[2:end] .+ [δ[ℓ] / τ₀^2 for ℓ in 2:N]
     end
 
     res = optimize(f, g!, zeros(N - 1), LBFGS())
