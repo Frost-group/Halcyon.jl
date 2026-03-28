@@ -48,7 +48,7 @@ default_worm_params(sys::System; C::Float64=1.0) =
 
 function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
                              l_fixed::Int=1, equil::Int=100_000, steps::Int=2_000_000,
-                             measure_every::Int=5)
+                             measure_every::Int=5, file_prefix::AbstractString="")
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
     sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=CoulombPotential())
@@ -127,6 +127,8 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
 
 # I must not fear the overfit.
 # Fear is the gradient-killer.
+
+    fp = isempty(file_prefix) ? "" : (endswith(file_prefix, "_") ? file_prefix : file_prefix * "_")
 
     # --- Shared setup: log-multiplicity and cycle-count matrix ---
     logM = zeros(Float64, PermFamHisto.n_families)
@@ -294,7 +296,7 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
     println("  θ_full: ", round.(theta_fit, digits=2))
 
     # write fit residuals for ALL sectors (including unobserved ones)
-    open("PermutationFamily_histogram_fit.dat", "w") do io
+    open(fp * "PermutationFamily_histogram_fit.dat", "w") do io
         println(io, "# count  family_index  P_hat  P_mult  P_p2  P_map  P_full  λ (nonzero parts, descending)")
         for k in 1:PermFamHisto.n_families
             c = PermFamHisto.count[k]
@@ -308,14 +310,14 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
     end
 
     # write theta models for comparison
-    open("PermutationFamily_theta_models.dat", "w") do io
+    open(fp * "PermutationFamily_theta_models.dat", "w") do io
         println(io, "# permutation_size  θ_mult  θ_p2  θ_map  θ_full")
         for k in 1:N
             @printf(io, "%8d  %.5e  %.5e  %.5e  %.5e\n", k, zeros(N)[k], theta_p2[k], theta_map[k], theta_fit[k])
         end
     end
 
-    open("PermutationFamily_histogram.dat", "w") do io
+    open(fp * "PermutationFamily_histogram.dat", "w") do io
         println(io, "# count  family_index  P_hat  λ (nonzero parts, descending)")
         for (k, c) in hits
             p_hat = c / n_tot
@@ -326,7 +328,7 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
         end
     end
 
-    open("PermutationFamily_moments.dat", "w") do io
+    open(fp * "PermutationFamily_moments.dat", "w") do io
         @printf(io, "#  ∑_l l·P̂(l) = %.6f\n", permutation_pl_sum_rule(P_mc))
         cache = Dict{Tuple{Int,Float64},Float64}()
         println(io, "\n# k    P(l,k) MC    P_u(l,k)     P(k) exact")
@@ -341,6 +343,15 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    #run_family_histogram(r_s=1.0, θ=0.125 ; l_fixed=1) # DuBois Table 1, Weak Coupling / High Density
-    run_family_histogram(r_s=10.0, θ=0.125 ; l_fixed=1) # DuBois Table 1, Strong Coupling / Low Density
+    if any(a -> a == "-h" || a == "--help", ARGS)
+        println("Usage: julia $(PROGRAM_FILE) <prefix> [r_s, default 10] [theta, default 0.125] [MCSteps, default 1_000_000]")
+        exit(1)
+    end
+
+    prefix = isempty(ARGS) ? "" : ARGS[1]
+    r_s = length(ARGS) >= 2 ? parse(Float64, ARGS[2]) : 10.0
+    theta = length(ARGS) >= 3 ? parse(Float64, ARGS[3]) : 0.125
+    MCSteps = length(ARGS) >= 4 ? parse(Int, ARGS[4]) : 1_000_000
+
+    run_family_histogram(r_s=r_s, θ=theta, steps=MCSteps, file_prefix=prefix)
 end

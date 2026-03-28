@@ -33,12 +33,15 @@ default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                             equil::Int=100_000, steps::Int=100_000_000, measure_every::Int=5)
+                             equil::Int=100_000, steps::Int=100_000_000, measure_every::Int=5, fp::AbstractString="")
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
-    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ)
+    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=YakubRonchiPotential(L=L, g=1.0))
     params = default_worm_params(sys)
     cfg = WormConfiguration(sys)
+
+    @printf("# Ideal fermions  N=%d  r_s=%g  θ=%g  β=%.2f  L=%.2f\n", N, r_s, θ, β, L)
+    println("# Equilibration:$(equil/1E6)M MC:$(steps/1E6)M Measure every:$(measure_every)")
 
     for _ in 1:equil
         worm_step!(cfg, sys, params)
@@ -58,7 +61,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         end
     end
     n_z == 0 && error("No Z-sector samples")
-    println(@sprintf("\n# Ideal fermions  N=%d  θ=%g  p(N)=%d  Z-samples=%d\n", N, θ, histo.n_families, n_z))
+    @printf("\n# Ideal fermions  N=%d  θ=%g  p(N)=%d  Z-samples=%d\n", N, θ, histo.n_families, n_z)
 
     # ---------------------------------------------------------------
     # Fit the model hierarchy with the new interface 
@@ -93,7 +96,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     q_map    = probabilities(mod_map,    histo)
     q_full   = probabilities(mod_full,   histo)
 
-    open("PermutationFamily_histogram_fit.dat", "w") do io
+    open(fp * "PermutationFamily_histogram_fit.dat", "w") do io
         println(io, "# count  family_index  P_hat  P_mult  P_dubois  P_map  P_full  λ")
         for k in 1:histo.n_families
             c = histo.count[k]
@@ -106,7 +109,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         end
     end
 
-    open("PermutationFamily_theta_models.dat", "w") do io
+    open(fp * "PermutationFamily_theta_models.dat", "w") do io
         println(io, "# cycle_length  θ_mult  θ_dubois  θ_map  θ_full")
         for ℓ in 1:N
             @printf(io, "%4d  %10.5f  %10.5f  %10.5f  %10.5f\n",
@@ -117,8 +120,22 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     return histo, models
 end
 
-if abspath(PROGRAM_FILE) == @__FILE__
+#if abspath(PROGRAM_FILE) == @__FILE__
 #    MC_and_fit_model(; N=33, θ=0.5, r_s=2.0)
 #    MC_and_fit_model(; N=33, θ=0.125, r_s=1.0) # DuBois Table 1, Weak Coupling / High Density
-    MC_and_fit_model(; N=33, θ=0.125, r_s=10.0)# DuBois Table 1, Strong Coupling / Low Density
+#    MC_and_fit_model(; N=33, θ=0.125, r_s=10.0)# DuBois Table 1, Strong Coupling / Low Density
+#end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    if any(a -> a == "-h" || a == "--help", ARGS)
+        println("Usage: julia $(PROGRAM_FILE) <file_prefix> [r_s, default 10] [theta, default 0.125] [MCSteps, default 1_000_000]")
+        exit(1)
+    end
+
+    file_prefix = isempty(ARGS) ? "" : ARGS[1]
+    r_s = length(ARGS) >= 2 ? parse(Float64, ARGS[2]) : 10.0
+    theta = length(ARGS) >= 3 ? parse(Float64, ARGS[3]) : 0.125
+    MCSteps = length(ARGS) >= 4 ? parse(Int, ARGS[4]) : 1_000_000
+
+    MC_and_fit_model(; r_s=r_s, θ=theta, steps=MCSteps, fp=file_prefix)
 end

@@ -38,12 +38,12 @@ default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                                 equil::Int=100_000, steps::Int=100_000_000, measure_every::Int=5,
+                                 equil::Int=100_000, steps::Int=10_000_000, measure_every::Int=5,
                                  lstm_epochs::Int=200, lstm_hidden::Int=64, lstm_embed::Int=16,
                                  lstm_lr::Float64=1e-3)
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
-    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=CoulombPotential())
+    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=YakubRonchiPotential(L=L,g=1))
     params = default_worm_params(sys)
     cfg = WormConfiguration(sys)
 
@@ -155,7 +155,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 #    MC_and_fit_model(; N=33, θ=0.5, r_s=2.0)
 #    MC_and_fit_model(; N=33, θ=0.125, r_s=1.0) # DuBois Table 1, Weak Coupling / High Density
 #MC_and_fit_model(; N=33, θ=0.125, r_s=10.0)# DuBois Table 1, Strong Coupling / Low Density
-MC_and_fit_model(; N=33, θ=0.5, r_s=10.0)
+MC_and_fit_model(; N=33, r_s=1.0, θ=0.125)
 
 
 end
