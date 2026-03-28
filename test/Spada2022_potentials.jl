@@ -26,6 +26,16 @@ using Halcyon
         @test U([1.0]) ≈ 1.0
         @test CoulombPotential(g=2.0)([2.0]) ≈ 1.0
     end
+    @testset "YakubRonchiPotential" begin
+        L = 10.0
+        r_cut = yakub_ronchi_r_cut(L)
+        @test r_cut ≈ L * cbrt(3 / (4π))
+        U = YakubRonchiPotential(L=L, g=1.0)
+        r = 0.5
+        inv_c = 1 / r_cut^3
+        ref = 1 / r + 0.5 * r^2 * inv_c - 1.5 / r_cut
+        @test U(r) ≈ ref
+    end
     @testset "YukawaPotential" begin
         U = YukawaPotential(g=1.0, m=1.0)
         @test U([1.0]) ≈ -exp(-1) / 1
