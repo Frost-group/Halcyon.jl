@@ -140,6 +140,63 @@ end
 
 
 # -----------------------------------------------------------------------------
+# Yakub–Ronchi (spherically averaged periodic Coulomb, OCP / UEG)
+# Ref: Yakub & Ronchi, J. Chem. Phys. 119, 11556 (2003); Dornheim et al. (2025) Eq. (Yakub_potential)
+# From reference to the ISHTAR source; Dornheim also has some 3x3x3 image expansoon
+# -----------------------------------------------------------------------------
+
+"""Volume-equivalent sphere radius for a cubic box of side `L`: ``r_{\\mathrm{cut}} = L (3/4\\pi)^{1/3}``."""
+@inline function yakub_ronchi_r_cut(L::Float64)::Float64
+    L * cbrt(3.0 / (4.0 * π))
+end
+
+"""
+    yakub_ronchi_phi(r, L; g=1.0)
+
+Isotropic Yakub–Ronchi pair potential ``\\phi_{\\mathrm{YR}}(r)`` for ``0 < r < r_{\\mathrm{cut}}``,
+zero otherwise. Coupling `g` scales the strength (``g=1`` is the usual ``1/r``-normalised form).
+"""
+function yakub_ronchi_phi(r::Float64, L::Float64; g::Float64=1.0)::Float64
+    r <= 0.0 && return Inf
+    r_cut = yakub_ronchi_r_cut(L)
+    r >= r_cut && return 0.0
+    t = r / r_cut
+    return (g / r) * (1.0 + 0.5 * t * (t * t - 3.0))
+end
+
+
+"""
+    yakub_ronchi_background_constant(L, N)
+
+Constant term in the YR Hamiltonian, ``- (3/(4 r_{\\mathrm{cut}}))(1 + N/5)`` (extensive scalar added once to `H`).
+
+Needed for absolute energies; but currently not integrated into the estimators.
+"""
+@inline function yakub_ronchi_background_constant(L::Float64, N::Integer)::Float64
+    r_cut = yakub_ronchi_r_cut(L)
+    -(3.0 / (4.0 * r_cut)) * (1.0 + N / 5.0)
+end
+
+"""
+    YakubRonchiPotential(L; g=1.0)
+
+Spherically averaged periodic Coulomb pair interaction for a cubic box of side `L` (Yakub–Ronchi).
+- Scalar call `U(r)` / `U(r_norm)` uses the single-distance form `yakub_ronchi_phi` (one term; same limitation as bare MIC Coulomb if the integrator only passes `|Δr|`).
+- Vector call `U(Δr)` uses `yakub_ronchi_periodic_sum` with raw `Δr = r_a - r_b` (recommended for correctness).
+"""
+Base.@kwdef struct YakubRonchiPotential <: PairPotential
+    L::Float64
+    g::Float64 = 1.0
+end
+
+function (U::YakubRonchiPotential)(r_norm::Float64)
+    yakub_ronchi_phi(r_norm, U.L; g=U.g)
+end
+
+Base.show(io::IO, obj::YakubRonchiPotential) =
+    print(io, "YakubRonchiPotential(L=$(obj.L), g=$(obj.g))")
+
+# -----------------------------------------------------------------------------
 # Yukawa Potential
 # -----------------------------------------------------------------------------
 
