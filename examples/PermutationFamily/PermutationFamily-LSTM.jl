@@ -38,7 +38,7 @@ default_worm_params(sys::System; C::Float64=1.0) =
     WormParams(C=C, j_max=sys.M ÷ 2, r_max=sys.L / 2)
 
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-                                 equil::Int=100_000, steps::Int=10_000_000, measure_every::Int=5,
+                                 equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=5,
                                  lstm_epochs::Int=200, lstm_hidden::Int=64, lstm_embed::Int=16,
                                  lstm_lr::Float64=1e-3)
     λħ = 0.5

@@ -11,7 +11,8 @@
 #   Vector{Int} length N (particle count), 
 #   nonnegative, 
 #   sum(λ)=N.
-
+# 
+# Though Nb: Now the LSTM has moved to a 3rd encoding: a reversed 'C' vector!
 
 
 """
