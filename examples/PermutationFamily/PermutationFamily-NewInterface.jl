@@ -55,8 +55,8 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     @showprogress desc="MC:$(steps/1E6)M" for t in 1:steps
         worm_step!(cfg, sys, params)
         if t % measure_every == 0 && cfg.sector == Z_SECTOR
-            λ_vec = permutation_family_lambda(cfg)
-            observe_permutation_family!(histo, λ_vec, 0.0)
+            C_vec = permutation_family_C(cfg)
+            observe_permutation_family!(histo, C_vec, 0.0)
             n_z += 1
         end
     end
@@ -97,15 +97,13 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     q_full   = probabilities(mod_full,   histo)
 
     open(fp * "PermutationFamily_histogram_fit.dat", "w") do io
-        println(io, "# count  family_index  P_hat  P_mult  P_dubois  P_map  P_full  λ")
+        println(io, "# count  family_index  P_hat  P_mult  P_dubois  P_map  P_full  C")
         for k in 1:histo.n_families
             c = histo.count[k]
             p_hat = c > 0 ? c / n_tot : 0.0
-            λk = permutation_family_lambda_from_rank(k, N, histo.P)
-            r = findfirst(iszero, λk)
-            head = isnothing(r) ? λk : λk[1:(r - 1)]
+            C_k = C_from_rank(k, N, histo.P)
             @printf(io, "%8d  %8d  %.5e  %.5e  %.5e  %.5e  %.5e  %s\n",
-                    c, k, p_hat, q_mult[k], q_dubois[k], q_map[k], q_full[k], string(collect(head)))
+                    c, k, p_hat, q_mult[k], q_dubois[k], q_map[k], q_full[k], string(C_k))
         end
     end
 

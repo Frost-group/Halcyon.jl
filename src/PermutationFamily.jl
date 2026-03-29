@@ -1,140 +1,143 @@
-# PermutationFamily code, sort of following DuBois, or at least what I assume they did
-#  
+# PermutationFamily — conjugacy class / permutation sector representation
+#
 #  ≈ conjugacy class of S_N 
-#  ≈ DeBois 'cycle type' and 'permutation sector' (though Nb: we use λ notation)
-#  ≈ formally we exploit the isomorphism to the integer partition of N
+#  ≈ DeBois 'cycle type' and 'permutation sector' 
+#  ≈ formally we exploit the isomorphism to the integer partition table of N,
+#    https://discrete.openmathbooks.org/more/mdm/sec_adv-linearparts.html
 #
 # I know this name is not very standard, but after trying a fe different ones, I felt
 # 'family' actually felt vague enough to be flexible and not get confused with other things
-#
-# λ 'integar partition' is the canonical form used in this code: 
-#   Vector{Int} length N (particle count), 
-#   nonnegative, 
-#   sum(λ)=N.
-# 
-# Though Nb: Now the LSTM has moved to a 3rd encoding: a reversed 'C' vector!
 
+# Dense ranking into 1:p(N) uses the standard integer partition count table P
+# to establish a bijection between C-vectors and ranks.
+
+# ===================================================================
+# Integer partition count table P[n+1, m+1]
+# ===================================================================
 
 """
-  integer_partition_count_table: integer_partition_count_table(nmax::Int)
-  
-  returnss P[n+1,m+1] = #{integer partitions of n with parts ≤ m}.
-  
-  See https://discrete.openmathbooks.org/more/mdm/sec_adv-linearparts.html
+    integer_partition_count_table(nmax) -> Matrix{Int}
+
+Dynamically-programmed table of restricted partition counts.
+
+`P[n+1, m+1]` = number of integer partitions of `n` whose parts are all ≤ `m`.
+In particular, `P[N+1, N+1]` = p(N) = total number of unrestricted partitions
+(= number of conjugacy classes of Sₙ).
+
+Recurrence: P[n,m] = P[n,m-1] + P[n-m,m]   (take ≥1 copy of part m, or skip m).
+Boundary:   P[0,m] = 1 ∀m,  P[n,0] = 0 for n>0.
+
+Ref: https://discrete.openmathbooks.org/more/mdm/sec_adv-linearparts.html
 """
 function integer_partition_count_table(nmax::Int)
     P = zeros(Int, nmax + 1, nmax + 1)
     for m in 0:nmax
-        P[1, m+1] = 1
+        P[1, m+1] = 1  # ONLY one way to partition 0: the empty partition; seeds the construction below
     end
     for n in 1:nmax
         for m in 1:nmax
+            # P[n+1, m+1] = count with parts ≤ m
+            #             = (partitions of n with parts ≤ m-1)     [skip m]
+            #             + (partitions of n-m with parts ≤ m)     [use ≥1 copy of m]
             P[n+1, m+1] = P[n+1, m] + (n >= m ? P[n-m+1, m+1] : 0)
         end
     end
     return P
 end
 
-"""Number of permutation families (conjugacy classes) for `N` particles: p(N)."""
+"""Number of permutation families (conjugacy classes) for `N` particles: p(N).
+This should be an exact equivalent to the Ramachandran-Hardy approximation. 
+"""
 permutation_family_count(N::Int, P::Matrix{Int}) = P[N+1, N+1]
 
-"""
-    permutation_family_lambda(N, cycle_lengths) -> Vector{Int}
+# ===================================================================
+# C-vector construction
+# ===================================================================
 
-Padded λ from multiset of cycle lengths (`sum(cycle_lengths) == N`). Sorts descending, pads to length `N`.
-`N` is the particle count (e.g. `sys.N`).
 """
-function permutation_family_lambda(N::Int, cycle_lengths::AbstractVector{Int})
+    permutation_family_C(N, cycle_lengths) -> Vector{Int}
+
+Build the cycle-count vector C from a multiset of cycle lengths.
+`C[ℓ]` = number of cycles of length `ℓ`.  Satisfies `∑ ℓ C[ℓ] = N`.
+"""
+function permutation_family_C(N::Int, cycle_lengths::AbstractVector{Int})
     s = sum(cycle_lengths)
     s == N || throw(ArgumentError("sum(cycle_lengths)=$s != N=$N"))
-    ls = sort!(collect(cycle_lengths); rev=true)
-    λ = zeros(Int, N)
-    lp = length(ls)
-    λ[1:lp] .= ls
-    return λ
+    C = zeros(Int, N)
+    for ℓ in cycle_lengths
+        C[ℓ] += 1
+    end
+    return C
 end
 
 """
-    permutation_family_lambda(cfg::WormConfiguration) -> Vector{Int}
+    permutation_family_C(cfg::WormConfiguration) -> Vector{Int}
 
-Padded λ for the current permutation on `cfg` (`N = size(cfg.r,1)`).
+Extract the cycle-count vector C directly from a WormConfiguration.
+Walks each permutation cycle exactly once.
 """
-function permutation_family_lambda(cfg::WormConfiguration)
-    N = size(cfg.r, 1) # bit of a hack? 
-    λ = zeros(Int, N) # emptied, so we can accumulate as we stripe
+function permutation_family_C(cfg::WormConfiguration)
+    N = size(cfg.r, 1)
+    C = zeros(Int, N)
     visited = falses(N)
-
     @inbounds for i in 1:N
         if !visited[i]
             cyc = get_cycle(cfg, i)
-            λ[i] = length(cyc) # stash dah number
+            C[length(cyc)] += 1
             for p in cyc
                 visited[p] = true
             end
         end
     end
-    # so now we have Lambda, with lots of zeros if big cycles 
-
-    sort!(λ; rev=true) # TA DA
-    return λ
+    return C
 end
 
-"""
-    C_permutation_sector(λ) -> Vector{Int}
+# ===================================================================
+# Ranking and unranking of C-vectors
+# ===================================================================
+#
+# Strategy: internally convert between C-vectors and the descending-sorted
+# integer partition representation (which the P table natively ranks).
+# The user never sees the partition; these are private helpers.
 
-DuBois-style counts ``C_ℓ`` (cycles of length ℓ), 
-`Vector` of length `N`, but now _element of vector_ states how big the cycle is. 
+# -- private: C-vector → descending partition --
+function _C_to_partition(C::Vector{Int})
+    parts = Int[]
+    for ℓ in length(C):-1:1  # descending cycle length → descending partition
+        for _ in 1:C[ℓ]
+            push!(parts, ℓ)
+        end
+    end
+    return parts
+end
 
-So ΣC[i]*i==N
-(Wheres Σλ=N)
-"""
-function C_permutation_sector(λ::Vector{Int})
-    N = length(λ)
+# -- private: descending partition → C-vector of length N --
+function _partition_to_C(partition::Vector{Int}, N::Int)
     C = zeros(Int, N)
-    for i in 1:N
-        m = λ[i]
-        m == 0 && break
-        C[m] += 1
+    for ℓ in partition
+        C[ℓ] += 1
     end
     return C
 end
 
-
-"""Uses a reverse-lexigraphic ordering of canonical partition (largest first, like European format or something?). Follows Matehmatica IntegerPartitions order.
-
-This seems to follow DeBois; from looking at the comparitive figures in the SI. 
-
-BUT it seems a bit stupid, as it ranks stuff lexigraphically, it goes like [6], [5,1], [4,2], etc. so has quite common cycles spread through the index. 
-
-I had a thought to re-order this to be more physical, by following the kind DeBois reasoning that larger cycles should be rare so pushing them to the end of the list, meaning like 99.9% of the MC moves fit in the L1 cache (till you go superfluid!)
-"""
-function recursive_partition_rank(partition::AbstractVector{Int}, n::Int, m::Int, P::Matrix{Int}; start_idx::Int=1)
+# -- private: rank a descending partition using the P table --
+# Uses reverse-lexicographic enumeration: partitions are ordered by
+# first part descending, then recursively.  The P table gives the
+# cumulative count of partitions whose leading part exceeds a given value.
+function _partition_rank(partition::AbstractVector{Int}, n::Int, m::Int, P::Matrix{Int}; start_idx::Int=1)
     n == 0 && return 1
-
     a1 = partition[start_idx]
-    hi = min(n, m)
+    # count partitions with leading part > a1 (they come before us)
     s = 0
-    for b in (a1+1):hi
+    for b in (a1+1):min(n, m)
         s += P[n-b+1, b+1]
     end
-    if length(partition) == start_idx
-        return s + 1
-    end
-    return s + recursive_partition_rank(partition, n - a1, a1, P, start_idx=start_idx + 1)
+    length(partition) == start_idx && return s + 1
+    return s + _partition_rank(partition, n - a1, a1, P, start_idx=start_idx + 1)
 end
 
-"""
-    permutation_family_index(λ, P, N) -> Int
-
-Dense index into `1:permutation_family_count(N,P)` via recursive ranking of canonical partition (padded λ).
-"""
-function permutation_family_index(λ::Vector{Int}, P::Matrix{Int}, N::Int)
-    r = findfirst(iszero, λ)
-    partition = isnothing(r) ? view(λ, 1:N) : view(λ, 1:(r-1))
-    recursive_partition_rank(partition, N, N, P)
-end
-
-function recursive_partition_unrank(n::Int, m::Int, k::Int, P::Matrix{Int})
+# -- private: unrank to a descending partition using the P table --
+function _partition_unrank(n::Int, m::Int, k::Int, P::Matrix{Int})
     n == 0 && return Int[]
     for b in min(n, m):-1:1
         cnt = P[n-b+1, b+1]
@@ -142,31 +145,53 @@ function recursive_partition_unrank(n::Int, m::Int, k::Int, P::Matrix{Int})
             k -= cnt
             continue
         end
-        rest = recursive_partition_unrank(n - b, b, k, P)
+        rest = _partition_unrank(n - b, b, k, P)
         return vcat([b], rest)
     end
-    error("unrank failed")
-end
-
-"""Padded λ for family `k` ∈ `1:p(N)` (inverse of `permutation_family_index`)."""
-function permutation_family_lambda_from_rank(k::Int, N::Int, P::Matrix{Int})
-    partition = recursive_partition_unrank(N, N, k, P)
-    λ = zeros(Int, N)
-    lp = length(partition)
-    λ[1:lp] .= partition
-    return λ
+    error("unrank failed: n=$n m=$m k=$k")
 end
 
 """
-    DensePermutationFamilyStats(N::Int)
+    C_to_rank(C, P, N) -> Int
+
+Dense rank in `1:p(N)` for cycle-count vector `C`.
+
+Internally reconstructs the descending partition from `C` and ranks it
+against the integer partition count table `P`.
+"""
+function C_to_rank(C::Vector{Int}, P::Matrix{Int}, N::Int)
+    parts = _C_to_partition(C)
+    _partition_rank(parts, N, N, P)
+end
+
+"""
+    C_from_rank(k, N, P) -> Vector{Int}
+
+Cycle-count vector for family rank `k ∈ 1:p(N)`.  Inverse of `C_to_rank`.
+
+Unranks through the partition count table `P`, then converts the resulting
+descending partition directly to cycle counts.
+"""
+function C_from_rank(k::Int, N::Int, P::Matrix{Int})
+    partition = _partition_unrank(N, N, k, P)
+    _partition_to_C(partition, N)
+end
+
+# ===================================================================
+# DensePermutationFamilyStats — dense histogram over conjugacy classes
+# ===================================================================
+
+"""
+    DensePermutationFamilyStats(N)
 
 OK, here's the magic! 
   (OK, maybe not magic. Maybe its dumb. But anyhoo, gotta start somewhere!)
  This is a Dense set of P(N) (permutation families, perhaps more formally conjugacy classes
  of the symmetric group S_N for N particles) elements, 
 
-'observations' to count the number of contributions
-'estimator' with a running mean (Welford-style incremental mean), which sounds more fancy than it is. 
+'count' to count the raw number of MC obsrvations
+'estimator' with a running increment of ALL observations. 
+(changed to this rather than a running mean as I remembered IEEE floats are exaft in addition?) 
 
 The size of this scales exponentially, but that exponential (O(sqrt(N))) is a HELLA LOT BETTER than N!
 
@@ -174,6 +199,18 @@ Name is a little historic: first I was playing with just Dict's (i.e. just hash 
 defn), but thought that standarising on λ representation and reading enough
 Wikipedia/Mathematica/Scary books on S_n group to get a dense object was more satisfying. 
 
+ToDo: Think about manipulating the ranking so that most probably cycles are near each other? 
+But then again, if I'm going down that fancy MC reweighting route, this is irrelevant and probably just extra complexity. 
+
+
+Dense histogram over all p(N) conjugacy classes of Sₙ.
+
+Fields:
+- `N::Int`:              particle count
+- `P::Matrix{Int}`:      integer partition count table (for ranking)
+- `n_families::Int`:     p(N) = total number of conjugacy classes
+- `count::Vector{Int64}`: observation count per sector
+- `estimator::Vector{Float64}`: running sum of observables per sector
 """
 struct DensePermutationFamilyStats
     N::Int
@@ -191,14 +228,16 @@ function DensePermutationFamilyStats(N::Int)
     DensePermutationFamilyStats(N, P, pn, zeros(Int64, pn), zeros(Float64, pn))
 end
 
-""" Just a mock to play with the code appriach currently"""
-function observe_permutation_family!(acc::DensePermutationFamilyStats, λ::Vector{Int}, E::Float64)
-    N = acc.N
-    k = permutation_family_index(λ, acc.P, N)
+"""
+    observe_permutation_family!(acc, C, E)
 
-    acc.count[k] += 1       # add one to raw count
-    acc.estimator[k] += E   # add one to running total (nb: removed running average, as remembered IEEE Float additions are lossless (and FAST!))
-    # THEREFORE, you need to divide by hte raw counts to get the estimate
+Record an observation in sector defined by cycle-count vector `C`, accumulating
+the observable value `E`.  Dividing `estimator[k]` by `count[k]` gives the mean.
+"""
+function observe_permutation_family!(acc::DensePermutationFamilyStats, C::Vector{Int}, E::Float64)
+    k = C_to_rank(C, acc.P, acc.N)
+    acc.count[k] += 1
+    acc.estimator[k] += E
 end
 
 # ===================================================================
@@ -213,15 +252,18 @@ using Optim: optimize, minimizer, NelderMead, LBFGS
 
 log M_k = log(N! / ∏_ℓ (ℓ^{C_ℓ} C_ℓ!)) for each of the p(N) permutation families.
 This is the combinatorial weight of sector k in S_N.
+
+Can also be seen as the probability of the permutation family, n the
+high-temperature / classical limit (T=∞), where all the quantumness drops away
+and we are just left with the degeneracy of the microstates.  
 """
 function log_multiplicities(stats::DensePermutationFamilyStats)
     N = stats.N
     logM = zeros(Float64, stats.n_families)
-    logN! = sum(log.(1:N))
+    logN_fact = sum(log.(1:N))
     for k in 1:stats.n_families
-        λk = permutation_family_lambda_from_rank(k, N, stats.P)
-        C_k = C_permutation_sector(λk)
-        logM[k] = logN!
+        C_k = C_from_rank(k, N, stats.P)
+        logM[k] = logN_fact
         @inbounds for ℓ in 1:N
             C_k[ℓ] > 0 && (logM[k] -= sum(log.(1:C_k[ℓ])) + C_k[ℓ] * log(ℓ))
         end
@@ -238,9 +280,7 @@ function cycle_count_matrix(stats::DensePermutationFamilyStats)
     N = stats.N
     C = zeros(Int, stats.n_families, N)
     for k in 1:stats.n_families
-        λk = permutation_family_lambda_from_rank(k, N, stats.P)
-        C_k = C_permutation_sector(λk)
-        C[k, :] .= C_k
+        C[k, :] .= C_from_rank(k, N, stats.P) # much more simple now!
     end
     C
 end

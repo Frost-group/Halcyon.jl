@@ -70,9 +70,9 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
     @showprogress desc="MC:$(steps/1E6)M" for t in 1:steps
         worm_step!(cfg, sys, params)
         if t % measure_every == 0 && cfg.sector == Z_SECTOR
-            λ_vec = permutation_family_lambda(cfg)
+            C_vec = permutation_family_C(cfg)
             W = permutation_pcf_weights(cfg)
-            observe_permutation_family!(PermFamHisto, λ_vec, 0.0)
+            observe_permutation_family!(PermFamHisto, C_vec, 0.0)
 
             w_pl = permutation_pl_weights(cfg)
             acc_pl .+= w_pl
@@ -115,10 +115,8 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
         println("\nTop 5 permutation-families:")
         for i in 1:min(5, n_unique)
             k, c = hits[i]
-            λk = permutation_family_lambda_from_rank(k, N, P_matrix)
-            r = findfirst(iszero, λk)
-            head = isnothing(r) ? λk : λk[1:(r - 1)]
-            @printf("  %2d. Count: %7d (%5.1f%%) | λ = %s\n", i, c, 100*c/n_tot, string(collect(head)))
+            C_k = C_from_rank(k, N, P_matrix)
+            @printf("  %2d. Count: %7d (%5.1f%%) | C = %s\n", i, c, 100*c/n_tot, string(C_k))
         end
         println("=============================\n")
     end
@@ -134,8 +132,7 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
     logM = zeros(Float64, PermFamHisto.n_families)
     C_matrix = zeros(Int, PermFamHisto.n_families, N)
     for k in 1:PermFamHisto.n_families
-        λk = permutation_family_lambda_from_rank(k, N, PermFamHisto.P)
-        C_k = C_permutation_sector(λk)
+        C_k = C_from_rank(k, N, PermFamHisto.P)
         C_matrix[k, :] .= C_k
         logM[k] = sum(log.(1:N))
         for l in 1:N
@@ -297,15 +294,13 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
 
     # write fit residuals for ALL sectors (including unobserved ones)
     open(fp * "PermutationFamily_histogram_fit.dat", "w") do io
-        println(io, "# count  family_index  P_hat  P_mult  P_p2  P_map  P_full  λ (nonzero parts, descending)")
+        println(io, "# count  family_index  P_hat  P_mult  P_p2  P_map  P_full  C")
         for k in 1:PermFamHisto.n_families
             c = PermFamHisto.count[k]
             p_hat = c / n_tot
-            λk = permutation_family_lambda_from_rank(k, N, PermFamHisto.P)
-            r = findfirst(iszero, λk)
-            head = isnothing(r) ? λk : λk[1:(r - 1)]
+            C_k = C_from_rank(k, N, PermFamHisto.P)
             @printf(io, "%8d  %8d  %.5e  %.5e  %.5e  %.5e  %.5e  %s\n",
-                    c, k, p_hat, q_mult[k], q_p2[k], q_map[k], q_model[k], string(collect(head)))
+                    c, k, p_hat, q_mult[k], q_p2[k], q_map[k], q_model[k], string(C_k))
         end
     end
 
@@ -318,13 +313,11 @@ function run_family_histogram(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M:
     end
 
     open(fp * "PermutationFamily_histogram.dat", "w") do io
-        println(io, "# count  family_index  P_hat  λ (nonzero parts, descending)")
+        println(io, "# count  family_index  P_hat  C")
         for (k, c) in hits
             p_hat = c / n_tot
-            λk = permutation_family_lambda_from_rank(k, N, PermFamHisto.P)
-            r = findfirst(iszero, λk)
-            head = isnothing(r) ? λk : λk[1:(r - 1)]
-            @printf(io, "%8d  %8d  %.5e  %s\n", c, k, p_hat, string(collect(head)))
+            C_k = C_from_rank(k, N, PermFamHisto.P)
+            @printf(io, "%8d  %8d  %.5e  %s\n", c, k, p_hat, string(C_k))
         end
     end
 

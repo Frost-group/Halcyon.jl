@@ -59,8 +59,8 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     @showprogress desc="MC:$(steps/1E6)M" for t in 1:steps
         worm_step!(cfg, sys, params)
         if t % measure_every == 0 && cfg.sector == Z_SECTOR
-            λ_vec = permutation_family_lambda(cfg)
-            observe_permutation_family!(MC_data, λ_vec, 0.0)
+            C_vec = permutation_family_C(cfg)
+            observe_permutation_family!(MC_data, C_vec, 0.0)
             n_z += 1
         end
     end
@@ -134,16 +134,14 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     n_tot = sum(MC_data.count)
 
     open("PermutationFamily_LSTM_comparison.dat", "w") do io
-        println(io, "# k  count  P_hat  P_mult  P_dubois  P_full  P_lstm_flat  P_lstm_mult  P_lstm_dub  λ")
+        println(io, "# k  count  P_hat  P_mult  P_dubois  P_full  P_lstm_flat  P_lstm_mult  P_lstm_dub  C")
         for k in 1:MC_data.n_families
             c = MC_data.count[k]
             p_hat = c > 0 ? c / n_tot : 0.0
-            λk = permutation_family_lambda_from_rank(k, N, MC_data.P)
-            r = findfirst(iszero, λk)
-            head = isnothing(r) ? λk : λk[1:(r - 1)]
+            C_k = C_from_rank(k, N, MC_data.P)
             @printf(io, "%8d  %8d  %.5e  %.5e  %.5e  %.5e  %.5e  %.5e  %.5e  %s\n",
                     k, c, p_hat, q_mult[k], q_dubois[k], q_full[k],
-                    q_lflat[k], q_lmult[k], q_ldub[k], string(collect(head)))
+                    q_lflat[k], q_lmult[k], q_ldub[k], string(C_k))
         end
     end
     println("Wrote PermutationFamily_LSTM_comparison.dat")

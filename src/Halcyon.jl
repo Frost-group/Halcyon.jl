@@ -48,11 +48,9 @@ export β_from_λT_ratio, β_from_T_ratio, λT_over_L
 export jacobi_theta3, G1_Z1_ratio, Z_N, E_N_exact, E_thermodynamic_limit
 export ideal_fermion_permutation_P_l
 
-# Permutation families (conjugacy / permutation cycles)
+# Permutation families (conjugacy classes / C-vector representation)
 export integer_partition_count_table, permutation_family_count
-export permutation_family_lambda, permutation_family_index
-export permutation_family_lambda_from_rank
-export C_permutation_sector
+export permutation_family_C, C_to_rank, C_from_rank
 export DensePermutationFamilyStats, observe_permutation_family!
 # Accessors on DensePermutationFamilyStats
 export log_multiplicities, cycle_count_matrix, empirical_probabilities
