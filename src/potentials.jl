@@ -23,6 +23,18 @@ function potential_derivative(V::AbstractPotential, r::AbstractVector{<:Real})
     return ForwardDiff.gradient(V, r)
 end
 
+"""
+    potential_derivative!(out, V::AbstractPotential, r)
+
+In-place evaluation of the gradient ∇V(r), storing the result in `out`.
+Fallback calls `potential_derivative` and copies.
+"""
+
+function potential_derivative!(out::AbstractVector, V::AbstractPotential, r::AbstractVector{<:Real})
+    out .= potential_derivative(V, r)
+    return out
+end
+
 # -----------------------------------------------------------------------------
 # Null Potential
 # -----------------------------------------------------------------------------
@@ -52,6 +64,13 @@ function potential_derivative(V::HarmonicPotential, r::AbstractVector{<:Real})
     # V(r) = k * |r|^2 = k * (x^2 + y^2 + ...)
     # ∇V = 2k * r
     return 2 * V.k * r
+end
+
+function potential_derivative!(out::AbstractVector, V::HarmonicPotential, r::AbstractVector{<:Real})
+    for d in eachindex(r, out)
+        @inbounds out[d] = 2 * V.k * r[d]
+    end
+    return out
 end
 
 
@@ -161,7 +180,21 @@ function yakub_ronchi_phi(r::Float64, L::Float64; g::Float64=1.0)::Float64
     r_cut = yakub_ronchi_r_cut(L)
     r >= r_cut && return 0.0
     t = r / r_cut
-    return (g / r) * (1.0 + 0.5 * t * (t * t - 3.0))
+    # phi = (g/r) * (1 + 0.5*t*(t^2 - 3))
+    #     = g/r + g/r * 0.5 * (r^3/r_cut^3 - 3r/r_cut)
+    #     = g/r + 0.5*g * (r^2/r_cut^3 - 3/r_cut)
+    return (g / r) + 0.5 * g * (r^2 / r_cut^3 - 3.0 / r_cut)
+end
+
+"""
+    yakub_ronchi_derivative(r, L; g=1.0)
+
+Derivative dphi/dr = -g/r^2 + g*r/r_cut^3.
+"""
+function yakub_ronchi_derivative(r::Float64, L::Float64; g::Float64=1.0)::Float64
+    r_cut = yakub_ronchi_r_cut(L)
+    r >= r_cut && return 0.0
+    return -g / (r * r) + g * r / (r_cut^3)
 end
 
 
@@ -193,8 +226,36 @@ function (U::YakubRonchiPotential)(r_norm::Float64)
     yakub_ronchi_phi(r_norm, U.L; g=U.g)
 end
 
+function (U::YakubRonchiPotential)(r::AbstractVector{<:Real})
+    yakub_ronchi_phi(norm(r), U.L; g=U.g)
+end
+
 Base.show(io::IO, obj::YakubRonchiPotential) =
     print(io, "YakubRonchiPotential(L=$(obj.L), g=$(obj.g))")
+
+function potential_derivative(U::YakubRonchiPotential, r::AbstractVector{T}) where {T<:Real}
+    r_norm = norm(r)
+    if r_norm == 0.0
+        return zero(r)
+    end
+    dv_dr = yakub_ronchi_derivative(r_norm, U.L; g=U.g)
+    # Return a new vector with the same type and size as r, but scaled
+    return (dv_dr / r_norm) .* r
+end
+
+function potential_derivative!(out::AbstractVector, U::YakubRonchiPotential, r::AbstractVector{<:Real})
+    r_norm = norm(r)
+    if r_norm == 0.0
+        fill!(out, 0.0)
+        return out
+    end
+    dv_dr = yakub_ronchi_derivative(r_norm, U.L; g=U.g)
+    factor = dv_dr / r_norm
+    for d in eachindex(r, out)
+        @inbounds out[d] = factor * r[d]
+    end
+    return out
+end
 
 # -----------------------------------------------------------------------------
 # Yukawa Potential

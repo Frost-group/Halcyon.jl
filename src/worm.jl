@@ -1071,8 +1071,9 @@ function energy_estimators(cfg::WormConfiguration, sys::System)
     a_hs = is_hs ? sys.U.a : 0.0
 
     # Temp arrays for position vectors (allocate once)
-    r_vec = zeros(D)
-    rij = zeros(D)
+    r_vec = zeros(Float64, D)
+    rij = zeros(Float64, D)
+    grad_vec = zeros(Float64, D)
 
     # =========================================================================
     # SINGLE-PARTICLE TERMS
@@ -1107,9 +1108,9 @@ function energy_estimators(cfg::WormConfiguration, sys::System)
                 V_total += sys.V(r_vec)
 
                 # Virial: (r - r_0) · ∇V
-                grad = potential_derivative(sys.V, r_vec)
+                potential_derivative!(grad_vec, sys.V, r_vec)
                 for d in 1:D
-                    Virial_G2 += (r[i, j, d] - r[i, 1, d]) * grad[d]
+                    Virial_G2 += (r[i, j, d] - r[i, 1, d]) * grad_vec[d]
                 end
             end
         end
@@ -1198,11 +1199,11 @@ function energy_estimators(cfg::WormConfiguration, sys::System)
                         dx = r[i, j, d] - r[k, j, d]
                         rij[d] = dx - L * round(dx / L)
                     end
-                    grad = potential_derivative(sys.U, rij)
+                    potential_derivative!(grad_vec, sys.U, rij)
 
                     for d in 1:D
                         diff = (r[i, j, d] - r[i, 1, d]) - (r[k, j, d] - r[k, 1, d])
-                        Virial_G2 += diff * grad[d]
+                        Virial_G2 += diff * grad_vec[d]
                     end
                 end
             end
