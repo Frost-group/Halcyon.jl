@@ -13,8 +13,8 @@ function WormConfiguration(sys::System)
     r = zeros(N, M, D)
 
     for i in 1:N
-        # Bead 0 uniformly in [0, L)^D
-        r[i, 1, :] .= L .* rand(D)
+        # Bead 0 uniformly in [-L/2, L/2)^D
+        r[i, 1, :] .= L .* (rand(D) .- 0.5)
 
         # Sample beads 1 to M-1 using a temporary closed loop Levy bridge
         # from bead 0 (index 1) to its image (also index 1)
@@ -128,7 +128,7 @@ Zero-allocation accessor.
 end
 
 @inline function _wrap_compact_and_winding(x::Float64, L::Float64)
-    n = floor(Int, x / L)
+    n = floor(Int, (x + L / 2) / L)
     return x - n * L, n
 end
 
@@ -218,16 +218,16 @@ end
 """
     recenter!(cfg::WormConfiguration, i::Int, L::Float64)
 
-Shift polymer i so that bead 0 is within the fundamental cell [0, L)^D.
+Shift polymer i so that bead 0 is within the fundamental cell [-L/2, L/2)^D.
 Updates winding numbers of polymer i and all polymers that connect to it.
 """
 function recenter!(cfg::WormConfiguration, i::Int, L::Float64)
     D = size(cfg.r, 3)
     M = size(cfg.r, 2)
 
-    # Compute shift needed to put bead 0 in [0, L)^D
+    # Compute shift needed to put bead 0 in [-L/2, L/2)^D
     for d in 1:D
-        Δw_d = floor(Int, cfg.r[i, 1, d] / L)
+        Δw_d = floor(Int, (cfg.r[i, 1, d] + L / 2) / L)
         if Δw_d != 0
             # 1. Shift beads 0..M-1 of polymer i
             for j in 1:M
@@ -1048,175 +1048,102 @@ function swap!(cfg::WormConfiguration, sys::System, params::WormParams)
 end
 
 """
-    energy_estimators(cfg, sys) -> (E_thermo, E_virial)
+    energy_components(cfg, sys) -> NamedTuple
 
-Thermodynamic and Virial energy estimators (Spada et al. 2022, Eq. A1-A2).
-Returns (E_thermo, E_virial) tuple.
+Decomposed energy estimator terms for diagnostics. Returns:
+`(; E_thermo, E_virial, K_spring, V_ext, V_pair, G1, G2_ext, G2_pair)`
 """
-function energy_estimators(cfg::WormConfiguration, sys::System)
+function energy_components(cfg::WormConfiguration, sys::System)
     N, M, D = sys.N, sys.M, sys.D
     λ, δτ, β, L = sys.λ, sys.τ, sys.β, sys.L
-    r = cfg.r  # Direct array access: r[particle, bead+1, dim]
+    r = cfg.r
 
-    # Accumulators
-    K_spring = 0.0   # Spring term (thermodynamic)
-    Virial_G1 = 0.0  # Virial Term 2: endpoint/winding correction
-    Virial_G2 = 0.0  # Virial Term 3: force × displacement
-    V_total = 0.0    # Potential energy
-    Term4 = 0.0      # Cao-Berne ∂U/∂δτ
+    K_spring = 0.0
+    G1 = 0.0
+    G2_ext = 0.0
+    G2_pair = 0.0
+    V_ext = 0.0
+    V_pair = 0.0
 
-    has_ext = !(sys.V isa HarmonicPotential && sys.V.k == 0.0)
-    has_pair = N > 1 && !(sys.U isa NullPairPotential)
-    is_hs = sys.U isa HardSpherePotential
-    a_hs = is_hs ? sys.U.a : 0.0
+    has_ext = !is_null(sys.V)
+    has_pair = N > 1 && !is_null(sys.U)
 
-    # Temp arrays for position vectors (allocate once)
     r_vec = zeros(Float64, D)
     rij = zeros(Float64, D)
-    grad_vec = zeros(Float64, D)
 
-    # =========================================================================
-    # SINGLE-PARTICLE TERMS
-    # =========================================================================
-    @inbounds for i in 1:N
-        # --- Virial Term 2: (R_{M-1} - R_M) · (R_M - R_0) ---
+    # 1. Centroids (per-particle bead average)
+    centroids = zeros(N, D)
+    for i in 1:N, j in 1:M, d in 1:D
+        centroids[i, d] += r[i, j, d]
+    end
+    centroids ./= M
+
+    centroid_i = zeros(D)
+
+    for i in 1:N
+        # 2. Endpoint term G1: (r_{M-1} − r_M) · (r_M − r_0)
         for d in 1:D
-            rm1 = r[i, M, d]                        # bead M-1
-            rm = get_endpoint(cfg, i, d, L)          # bead M (endpoint)
-            r0 = r[i, 1, d]                          # bead 0
-            Virial_G1 += (rm1 - rm) * (rm - r0)
+            rm1 = r[i, M, d]
+            rm  = get_endpoint(cfg, i, d, L)
+            r0  = r[i, 1, d]
+            G1 += (rm1 - rm) * (rm - r0)
         end
 
-        # --- Spring term and external potential ---
-        for j in 1:M  # j is array index (bead index = j-1)
-            # Spring: |r[j] - r[j+1]|² with MIC
+        for j in 1:M
+            # 3. Spring term K_spring = Σ |r_j − r_{j+1}|²
             for d in 1:D
-                if j < M
-                    dx = r[i, j, d] - r[i, j+1, d]
+                dx = if j < M
+                    r[i, j, d] - r[i, j+1, d]
                 else
-                    dx = r[i, M, d] - get_endpoint(cfg, i, d, L)
+                    r[i, M, d] - get_endpoint(cfg, i, d, L)
                 end
-                dx -= L * round(dx / L)  # MIC
+                dx -= L * round(dx / L)
                 K_spring += dx * dx
             end
 
-            # External potential V(r)
+            # 4. External potential: V_ext and centroid virial G2_ext
             if has_ext
-                for d in 1:D
-                    r_vec[d] = r[i, j, d]
-                end
-                V_total += sys.V(r_vec)
-
-                # Virial: (r - r_0) · ∇V
-                potential_derivative!(grad_vec, sys.V, r_vec)
-                for d in 1:D
-                    Virial_G2 += (r[i, j, d] - r[i, 1, d]) * grad_vec[d]
-                end
+                @inbounds for d in 1:D; r_vec[d] = r[i, j, d]; end
+                V_ext += sys.V(r_vec)
+                @inbounds for d in 1:D; centroid_i[d] = centroids[i, d]; end
+                G2_ext += centroid_virial_term(sys.V, r_vec, centroid_i)
             end
         end
     end
 
-    # =========================================================================
-    # PAIR INTERACTION TERMS
-    # =========================================================================
+    # 5. Pair potential: V_pair and virial G2_pair
     if has_pair
-        @inbounds for j in 1:M
-            for i in 1:N-1, k in i+1:N
-                # Distance |r_i - r_k| with MIC
-                d2_j = 0.0
-                for d in 1:D
-                    dx = r[i, j, d] - r[k, j, d]
-                    dx -= L * round(dx / L)
-                    d2_j += dx * dx
-                end
-                dist_j = sqrt(d2_j)
-
-                if is_hs
-                    # --- Hard-sphere (Cao-Berne) ---
-                    # Next slice distance and dot product
-                    d2_n, dot_jn = 0.0, 0.0
-                    for d in 1:D
-                        r_i_j = r[i, j, d]
-                        r_k_j = r[k, j, d]
-                        dx_j = r_i_j - r_k_j
-                        dx_j -= L * round(dx_j / L)
-
-                        if j < M
-                            r_i_n = r[i, j+1, d]
-                            r_k_n = r[k, j+1, d]
-                        else
-                            r_i_n = get_endpoint(cfg, i, d, L)
-                            r_k_n = get_endpoint(cfg, k, d, L)
-                        end
-                        dx_n = r_i_n - r_k_n
-                        dx_n -= L * round(dx_n / L)
-
-                        d2_n += dx_n * dx_n
-                        dot_jn += dx_j * dx_n
-                    end
-                    dist_n = sqrt(d2_n)
-
-                    # Cao-Berne derivatives
-                    du_dr, du_dr_n, du_dcos, du_dτ = cao_berne_derivatives(dist_j, dist_n, dot_jn, a_hs, λ, δτ)
-                    isinf(du_dr) && return (NaN, NaN)
-                    Term4 += du_dτ
-
-                    # Virial force terms
-                    cos_θ = clamp(dot_jn / (dist_j * dist_n), -1.0, 1.0)
-                    f1 = (du_dr - du_dcos * cos_θ / dist_j) / dist_j
-                    f2 = du_dcos / (dist_j * dist_n)
-                    f3 = (du_dr_n - du_dcos * cos_θ / dist_n) / dist_n
-                    f4 = f2
-
-                    for d in 1:D
-                        dx_j = r[i, j, d] - r[k, j, d]
-                        dx_j -= L * round(dx_j / L)
-
-                        if j < M
-                            ri_n, rk_n = r[i, j+1, d], r[k, j+1, d]
-                        else
-                            ri_n = get_endpoint(cfg, i, d, L)
-                            rk_n = get_endpoint(cfg, k, d, L)
-                        end
-                        dx_n = ri_n - rk_n
-                        dx_n -= L * round(dx_n / L)
-
-                        # Force vectors
-                        g_j = f1 * dx_j + f2 * dx_n
-                        g_n = f3 * dx_n + f4 * dx_j
-
-                        # Virial: ((r_i - r_{i,0}) - (r_k - r_{k,0})) · g
-                        diff_j = (r[i, j, d] - r[i, 1, d]) - (r[k, j, d] - r[k, 1, d])
-                        diff_n = (ri_n - r[i, 1, d]) - (rk_n - r[k, 1, d])
-                        Virial_G2 += diff_j * g_j + diff_n * g_n
-                    end
-
-                else
-                    # --- Soft pair potential ---
-                    V_total += sys.U(dist_j)
-
-                    for d in 1:D
-                        dx = r[i, j, d] - r[k, j, d]
-                        rij[d] = dx - L * round(dx / L)
-                    end
-                    potential_derivative!(grad_vec, sys.U, rij)
-
-                    for d in 1:D
-                        diff = (r[i, j, d] - r[i, 1, d]) - (r[k, j, d] - r[k, 1, d])
-                        Virial_G2 += diff * grad_vec[d]
-                    end
-                end
+        for j in 1:M, i in 1:N-1, k in i+1:N
+            @inbounds for d in 1:D
+                dx = r[i, j, d] - r[k, j, d]
+                rij[d] = dx - L * round(dx / L)
             end
+            V_pair += sys.U(rij)
+            G2_pair += virial_contribution(sys.U, rij)
         end
     end
 
-    # =========================================================================
-    # ASSEMBLY (Spada Eq. A1 and A2)
-    # =========================================================================
-    E_thermo = D * N / (2δτ) - K_spring / (4λ * δτ^2 * M) + Term4 / M + V_total / M
-    E_virial = D * N / (2β) + Virial_G1 / (4λ * δτ^2 * M) + Virial_G2 / (2β * M) + Term4 / M + V_total / M
+    V_total = V_ext + V_pair
+    G2 = G2_ext + G2_pair
 
-    return E_thermo, E_virial
+    # Assembly (Spada et al. 2022 Eq. A1–A2; Cao & Berne 1989 Eq. 5)
+    #   Thermo: E = DN/(2δτ) − K_spring/(4λδτ²M) + ⟨V⟩
+    #   Virial: E = DN/(2β)  + G1/(4λδτ²M) + G2/(2M) + ⟨V⟩
+    E_thermo = (D * N / (2δτ)) - (K_spring / (4λ * δτ^2 * M)) + (V_total / M)
+    E_virial = (D * N / (2β))  + (G1 / (4λ * δτ^2 * M)) + (G2 / (2.0 * M)) + (V_total / M)
+
+    return (; E_thermo, E_virial, K_spring, V_ext, V_pair, G1, G2_ext, G2_pair)
+end
+
+"""
+    energy_estimators(cfg, sys) -> (E_thermo, E_virial)
+
+Thermodynamic and centroid virial energy estimators.
+Refs: Spada et al. 2022 Eq. A1–A2; Cao & Berne 1989 Eq. 5.
+"""
+function energy_estimators(cfg::WormConfiguration, sys::System)
+    ec = energy_components(cfg, sys)
+    return ec.E_thermo, ec.E_virial
 end
 
 """
