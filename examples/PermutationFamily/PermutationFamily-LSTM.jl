@@ -166,7 +166,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     @printf("\n#MC Complete! N=%d  r_s=%g θ=%g  n_families=%d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, n_z)
     MC_E = calculate_mc_energy(MC_data)
 
-    @printf("MC_E= %.8f MC_E/N= %.8f (includes jellium bg)\n", MC_E + N*E_bg, (MC_E + N*E_bg) / N)
+    @printf("MC_E= %.8f MC_E/N= %.8f Ha = %.8f Ry (includes jellium bg)\n", MC_E + N*E_bg, (MC_E + N*E_bg) / N, 2*(MC_E + N*E_bg) / N)
 
     # ---------------------------------------------------------------
     # Exponential family fits
@@ -211,9 +211,12 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         ("LSTM (DuBois prior)", model_lstm_DuBois),
     ]
 
-    @printf("%-30s E= %.8f E/N= %.8f Ha = %.8f Ry \n", "MonteCarloAsCeperleyIntended", MC_E, MC_E / N, 2*MC_E/N)
+    @printf("%-30s MC_E= %.8f MC_E/N= %.8f Ha = %.8f Ry (includes jellium bg)\n", 
+            "MonteCarloAsCeperleyIntended", 
+            MC_E + N*E_bg, 
+            (MC_E + N*E_bg) / N, 2*(MC_E + N*E_bg) / N)
 
-    println("\nModel fits:")
+    println("Model fits:")
     for (label, m) in models
         KL = kl_divergence(m, MC_data)
         avgsign = calculate_reweighted_sign(m, MC_data)
@@ -264,7 +267,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
     Nmagic=33
-    magicsteps=1_000_000
+    magicsteps=5_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
@@ -274,9 +277,9 @@ if abspath(PROGRAM_FILE) == @__FILE__
     
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha
-    MC_and_fit_model(; N=nmagic, θ=0.125, r_s=1.0, steps=magicsteps)
+    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps)
     # rs=10.0 -> -0.1038 Ha
-    MC_and_fit_model(; N=magic, θ=0.125, r_s=10.0, steps=magicsteps)
+    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps)
 
     # Dornheim et al. 2025, JCP 163, 154101 - Reweighting estimator
     # MC_and_fit_model(; N=4, r_s=0.5, θ=1.0, steps=100_000_000,)
