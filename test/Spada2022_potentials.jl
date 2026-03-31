@@ -5,11 +5,12 @@ using Halcyon
 
 @testset "Spada2022 potentials" begin
     @testset "HarmonicPotential" begin
+        # V(r) = ½ k |r|²
         V = HarmonicPotential()
         @test V([0.0]) ≈ 0.0
-        @test V([1.0]) ≈ 1.0
-        @test V([2.0, 3.0]) ≈ 13.0
-        @test HarmonicPotential(k=2.0)([-1.0, 2.0]) ≈ 10.0
+        @test V([1.0]) ≈ 0.5              # ½ × 1 × 1²
+        @test V([2.0, 3.0]) ≈ 6.5         # ½ × 1 × (4+9)
+        @test HarmonicPotential(k=2.0)([-1.0, 2.0]) ≈ 5.0  # ½ × 2 × (1+4)
     end
     @testset "DoubleWellPotential" begin
         V = DoubleWellPotential()
@@ -47,15 +48,16 @@ end
 
 @testset "potential_derivative (for virial estimator)" begin
     @testset "HarmonicPotential Vector" begin
+        # V = ½ k |r|², ∇V = k r
         V = HarmonicPotential(k=2.0)
         r = [1.0, 2.0, 3.0]
-        @test potential_derivative(V, r) ≈ 2 * 2.0 * r
+        @test potential_derivative(V, r) ≈ 2.0 * r
     end
     @testset "Harmonic 3D" begin
         V = HarmonicPotential(k=2.0)
         r = Float64[1, 2, 3]
         g = potential_derivative(V, r)
-        @test g ≈ 2 * 2.0 * r
+        @test g ≈ 2.0 * r
         @test length(g) == 3
     end
     @testset "DoubleWellPotential 3D" begin
@@ -81,6 +83,25 @@ end
         g = potential_derivative(U, r)
         @test g isa AbstractVector
         @test all(isfinite, g)
+    end
+end
+
+@testset "centroid_virial_term (pair potentials)" begin
+    using LinearAlgebra: norm, dot
+    @testset "Coulomb: hand-computed" begin
+        U = CoulombPotential(g=2.0)
+        rij = [3.0, 4.0, 0.0]          # |r| = 5
+        Δc  = [1.0, 0.0, 0.0]
+        # ∇U = −g/r³ · r = −2/125 · [3,4,0]
+        # (rij − Δc) · ∇U
+        expected = dot(rij .- Δc, (-U.g / norm(rij)^3) .* rij)
+        @test centroid_virial_term(U, rij, Δc) ≈ expected
+    end
+    @testset "Coulomb: reduces to primitive when Δc=0" begin
+        U = CoulombPotential(g=1.0)
+        rij = [1.0, 2.0, 2.0]
+        Δc  = [0.0, 0.0, 0.0]
+        @test centroid_virial_term(U, rij, Δc) ≈ virial_contribution(U, rij)
     end
 end
 
