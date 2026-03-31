@@ -31,7 +31,8 @@ export translate!, redraw!, open!, close!, swap!, move_head!, move_tail!, worm_s
 
 # Estimators and analysis
 export energy_estimators, energy_components
-export potential_derivative
+export potential_derivative, virial_contribution
+export is_null, centroid_virial_term
 export get_cycle, extract_extended_path, recenter!
 export get_bead, get_endpoint, total_winding, superfluid_fraction
 export count_cycles, permutation_sign  # Fermion sign tracking
@@ -46,6 +47,7 @@ export accumulate_trap_radial_2d!, finalize_trap_radial_2d, blocking_mean_stderr
 export z1, E1_exact, thermal_wavelength, critical_temperature
 export β_from_λT_ratio, β_from_T_ratio, λT_over_L
 export jacobi_theta3, G1_Z1_ratio, Z_N, E_N_exact, E_thermodynamic_limit
+export Z_N_Fermi, E_N_exact_Fermi
 export ideal_fermion_permutation_P_l
 
 # Permutation families (conjugacy classes / C-vector representation)

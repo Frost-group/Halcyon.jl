@@ -1070,6 +1070,7 @@ function energy_components(cfg::WormConfiguration, sys::System)
 
     r_vec = zeros(Float64, D)
     rij = zeros(Float64, D)
+    Δc = zeros(Float64, D)
 
     # 1. Centroids (per-particle bead average)
     centroids = zeros(N, D)
@@ -1111,15 +1112,17 @@ function energy_components(cfg::WormConfiguration, sys::System)
         end
     end
 
-    # 5. Pair potential: V_pair and virial G2_pair
+    # 5. Pair potential: V_pair and centroid virial G2_pair
     if has_pair
         for j in 1:M, i in 1:N-1, k in i+1:N
             @inbounds for d in 1:D
                 dx = r[i, j, d] - r[k, j, d]
                 rij[d] = dx - L * round(dx / L)
+                dc = centroids[i, d] - centroids[k, d]
+                Δc[d] = dc - L * round(dc / L)
             end
             V_pair += sys.U(rij)
-            G2_pair += virial_contribution(sys.U, rij)
+            G2_pair += centroid_virial_term(sys.U, rij, Δc)
         end
     end
 

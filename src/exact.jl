@@ -252,6 +252,63 @@ function E_N_exact(N::Int, β::Float64, L::Float64, λ::Float64; nmax::Int=50)
     return -(log(Z_plus) - log(Z_minus)) / (2δβ)
 end
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Ideal Fermi gas (canonical, finite N)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+    Z_N_Fermi(N, β, L, λ; cache=nothing, nmax=50) -> Float64
+
+N-particle canonical partition function for non-interacting spin-polarised fermions.
+Ref: Krauth, *Statistical Mechanics: Algorithms and Computations* (2006).
+
+Signed recursion:  Z^F_N = (1/N) Σ_{k=1}^N (-1)^{k+1} z₁(kβ) Z^F_{N-k}
+
+with Z^F_0 = 1 and z₁ the (statistics-independent) single-particle partition function.
+"""
+function Z_N_Fermi(N::Int, β::Float64, L::Float64, λ::Float64;
+                   cache::Union{Nothing,Dict}=nothing, nmax::Int=50)
+    N == 0 && return 1.0
+    N == 1 && return z1(β, L, λ; nmax=nmax)
+
+    if cache !== nothing
+        key = (N, β)
+        haskey(cache, key) && return cache[key]
+    end
+
+    result = 0.0
+    for k in 1:N
+        z_k = z1(k * β, L, λ; nmax=nmax)
+        Z_rem = Z_N_Fermi(N - k, β, L, λ; cache=cache, nmax=nmax)
+        result += (-1)^(k + 1) * z_k * Z_rem
+    end
+    result /= N
+
+    if cache !== nothing
+        cache[(N, β)] = result
+    end
+    return result
+end
+
+"""
+    E_N_exact_Fermi(N, β, L, λ; nmax=50) -> Float64
+
+Exact internal energy for N non-interacting spin-polarised fermions.
+Computed via numerical differentiation of `Z_N_Fermi`.
+"""
+function E_N_exact_Fermi(N::Int, β::Float64, L::Float64, λ::Float64; nmax::Int=50)
+    N == 1 && return E1_exact(β, L, λ; nmax=nmax)
+
+    δβ = β * 1e-6
+    cache_plus  = Dict{Tuple{Int,Float64},Float64}()
+    cache_minus = Dict{Tuple{Int,Float64},Float64}()
+
+    Z_plus  = Z_N_Fermi(N, β + δβ, L, λ; cache=cache_plus,  nmax=nmax)
+    Z_minus = Z_N_Fermi(N, β - δβ, L, λ; cache=cache_minus, nmax=nmax)
+
+    return -(log(Z_plus) - log(Z_minus)) / (2δβ)
+end
+
 """
     E_thermodynamic_limit(T_ratio, λ) -> Float64
 

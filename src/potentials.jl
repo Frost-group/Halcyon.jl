@@ -7,6 +7,15 @@ using ForwardDiff
 
 abstract type AbstractPotential end
 abstract type ExternalPotential <: AbstractPotential end
+
+"""
+    virial_contribution(U, r)
+
+Return the radial virial contribution ``r \\cdot \\nabla V(r) + L \\frac{\\partial V}{\\partial L}``.
+This is essential for the virial energy estimator.
+"""
+function virial_contribution end
+
 abstract type PairPotential <: AbstractPotential end
 
 # Fallback: if called with a scalar, assume it's |r| and convert to vector call if needed,
@@ -35,6 +44,34 @@ function potential_derivative!(out::AbstractVector, V::AbstractPotential, r::Abs
     return out
 end
 
+"""
+    is_null(V::AbstractPotential) -> Bool
+
+Return `true` if the potential contributes nothing to the action or energy.
+"""
+is_null(::AbstractPotential) = false
+
+"""
+    centroid_virial_term(V, r, centroid_or_Δcentroid) -> Float64
+
+Centroid virial kinetic contribution `(r − R̄) · ∇V(r)`.
+
+For external potentials, `centroid_or_Δcentroid` is the particle centroid R̄ᵢ.
+For pair potentials, `r` is the MIC pair displacement Δrᵢₖ and
+`centroid_or_Δcentroid` is the MIC centroid difference R̄ᵢ − R̄ₖ.
+
+Specialisations avoid allocations for hot-path potentials.
+"""
+function centroid_virial_term(V::ExternalPotential, r::AbstractVector, centroid::AbstractVector)
+    g = potential_derivative(V, r)
+    return dot(r .- centroid, g)
+end
+
+function centroid_virial_term(U::PairPotential, rij::AbstractVector, Δcentroid::AbstractVector)
+    g = potential_derivative(U, rij)
+    return dot(rij .- Δcentroid, g)
+end
+
 # -----------------------------------------------------------------------------
 # Null Potential
 # -----------------------------------------------------------------------------
@@ -43,6 +80,11 @@ struct NullPairPotential <: PairPotential end
 
 (::NullPairPotential)(r_norm::Float64) = 0.0
 (::NullPairPotential)(r::AbstractVector{<:Real}) = 0.0
+potential_derivative(::NullPairPotential, r::AbstractVector{<:Real}) = zero(r)
+virial_contribution(U::NullPairPotential, r) = 0.0
+
+is_null(::NullPairPotential) = true
+centroid_virial_term(::NullPairPotential, ::AbstractVector, ::AbstractVector) = 0.0
 
 Base.show(io::IO, obj::NullPairPotential) = print(io, "NullPairPotential()")
 
@@ -55,22 +97,36 @@ Base.@kwdef struct HarmonicPotential <: ExternalPotential
     k::Float64 = 1.0
 end
 
-(V::HarmonicPotential)(r_sq::Float64) = V.k * r_sq
-(V::HarmonicPotential)(r::AbstractVector{<:Real}) = V.k * (norm(r)^2)
+(V::HarmonicPotential)(r_sq::Float64) = 0.5 * V.k * r_sq
+(V::HarmonicPotential)(r::AbstractVector{<:Real}) = 0.5 * V.k * sum(abs2, r)
 
 Base.show(io::IO, obj::HarmonicPotential) = print(io, "HarmonicPotential(k=$(obj.k))")
 
 function potential_derivative(V::HarmonicPotential, r::AbstractVector{<:Real})
-    # V(r) = k * |r|^2 = k * (x^2 + y^2 + ...)
-    # ∇V = 2k * r
-    return 2 * V.k * r
+    # V(r) = 0.5 * k * |r|^2 = 0.5 * k * (x^2 + y^2 + ...)
+    # ∇V = k * r
+    return V.k * r
 end
 
 function potential_derivative!(out::AbstractVector, V::HarmonicPotential, r::AbstractVector{<:Real})
     for d in eachindex(r, out)
-        @inbounds out[d] = 2 * V.k * r[d]
+        @inbounds out[d] = V.k * r[d]
     end
     return out
+end
+
+is_null(V::HarmonicPotential) = (V.k == 0.0)
+
+function virial_contribution(V::HarmonicPotential, r::AbstractVector)
+    return 2.0 * V(r)
+end
+
+function centroid_virial_term(V::HarmonicPotential, r::AbstractVector, centroid::AbstractVector)
+    s = 0.0
+    @inbounds for d in eachindex(r, centroid)
+        s += (r[d] - centroid[d]) * V.k * r[d]
+    end
+    return s
 end
 
 
@@ -150,11 +206,24 @@ end
 
 Base.show(io::IO, obj::CoulombPotential) = print(io, "CoulombPotential(g=$(obj.g))")
 
-function potential_derivative(U::CoulombPotential, r::AbstractVector{<:Real})
-    # V(r) = g/|r|, so ∇V = -g*r/|r|³
+function potential_derivative(U::CoulombPotential, r::AbstractVector)
     r_norm = norm(r)
-    r_norm == 0.0 && return zero(r)
     return (-U.g / r_norm^3) * r
+end
+
+function virial_contribution(U::CoulombPotential, r::AbstractVector)
+    return -1.0 * U(r)
+end
+
+function centroid_virial_term(U::CoulombPotential, rij::AbstractVector, Δcentroid::AbstractVector)
+    r_norm = norm(rij)
+    r_norm == 0.0 && return 0.0
+    # ∇U = −g/r³ · r ⟹ (Δr − ΔR̄)·∇U = −(g/r³) Σ_d (rij_d − Δc_d) rij_d
+    s = 0.0
+    @inbounds for d in eachindex(rij, Δcentroid)
+        s += (rij[d] - Δcentroid[d]) * rij[d]
+    end
+    return (-U.g / r_norm^3) * s
 end
 
 
@@ -250,11 +319,26 @@ function potential_derivative!(out::AbstractVector, U::YakubRonchiPotential, r::
         return out
     end
     dv_dr = yakub_ronchi_derivative(r_norm, U.L; g=U.g)
-    factor = dv_dr / r_norm
-    for d in eachindex(r, out)
-        @inbounds out[d] = factor * r[d]
-    end
+    out .= (dv_dr / r_norm) .* r
     return out
+end
+
+function virial_contribution(U::YakubRonchiPotential, r::AbstractVector)
+    r_norm = norm(r)
+    (r_norm == 0.0 || r_norm >= yakub_ronchi_r_cut(U.L)) && return 0.0
+    return -1.0 * U(r_norm)
+end
+
+function centroid_virial_term(U::YakubRonchiPotential, rij::AbstractVector, Δcentroid::AbstractVector)
+    r_norm = norm(rij)
+    (r_norm == 0.0 || r_norm >= yakub_ronchi_r_cut(U.L)) && return 0.0
+    dv_dr = yakub_ronchi_derivative(r_norm, U.L; g=U.g)
+    # ∇U = (dV/dr)(r̂) = (dV/dr / r) · r ⟹ (Δr − ΔR̄)·∇U = (dV/dr / r) Σ (rij_d − Δc_d) rij_d
+    s = 0.0
+    @inbounds for d in eachindex(rij, Δcentroid)
+        s += (rij[d] - Δcentroid[d]) * rij[d]
+    end
+    return (dv_dr / r_norm) * s
 end
 
 # -----------------------------------------------------------------------------
