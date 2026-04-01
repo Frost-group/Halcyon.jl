@@ -88,7 +88,7 @@ function calculate_mc_energy(stats::DensePermutationFamilyStats)
             Z_sign += sigma * p_k
         end
     end
-    return Etot / Z_sign
+    return Etot / Z_sign, Z_sign
 end
 
 function calculate_reweighted_sign(model::AbstractPermutationModel, stats::DensePermutationFamilyStats)
@@ -163,10 +163,10 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     println("DensePermutationFamilyStats  N=$N  p(N)=$(MC_data.n_families)  ",
         "size=$(Base.summarysize(MC_data) ÷ 1024) KiB")    
     n_z=sum(MC_data.count)
-    @printf("\n#MC Complete! N=%d  r_s=%g θ=%g  n_families=%d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, n_z)
-    MC_E = calculate_mc_energy(MC_data)
-
-    @printf("MC_E= %.8f MC_E/N= %.8f Ha = %.8f Ry (includes jellium bg)\n", MC_E + N*E_bg, (MC_E + N*E_bg) / N, 2*(MC_E + N*E_bg) / N)
+    @printf("\n# MC Complete! N= %d  r_s= %g θ= %g  n_families= %d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, n_z)
+    MC_E, sigma = calculate_mc_energy(MC_data)
+    @printf("# MC_E= %.8f σ=  %.8f MC_E/N= %.8f Ha = %.8f Ry (including Yakub-Ronchi Jellium background)\n", 
+            MC_E + N*E_bg, sigma, (MC_E + N*E_bg) / N, 2*(MC_E + N*E_bg)/ N)
 
     # ---------------------------------------------------------------
     # Exponential family fits
@@ -184,52 +184,46 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
 
     lstm_kw = (; n_embed=lstm_embed, n_hidden=lstm_hidden, epochs=lstm_epochs, lr=lstm_lr)
 
-    # 1. No prior — flat bias, LSTM must learn everything from scratch
-    no_prior = MultiplicityModel(zeros(N))
-    no_prior.θ .= 0.0  # θ=0 and the -log(v)-log(c+1) terms still active
-    println("Training LSTM (no prior)...")
-    model_lstm_flat = fit(LSTMPermutationModel, MC_data; prior=no_prior, lstm_kw...)
-
-    # 2. Multiplicity prior — gets M(λ) factors for free (θ=0)
+    # 1. Multiplicity prior — gets M(λ) factors for free (θ=0)
     println("Training LSTM (multiplicity prior)...")
     model_lstm_mult = fit(LSTMPermutationModel, MC_data; prior=model_mult, lstm_kw...)
-
-    # 3. DuBois prior — gets M(λ) + κ-penalty for free
+    # 2. DuBois prior — gets M(λ) + κ-penalty for free
     println("Training LSTM (DuBois prior)...")
     model_lstm_DuBois = fit(LSTMPermutationModel, MC_data; prior=model_dubois, lstm_kw...)
+    # 3. LSTM on MAP, so already optim Bayesian Theta-model
+    println("Training LSTM (MAP-on-DuBois prior)...")
+    model_lstm_MAP = fit(LSTMPermutationModel, MC_data; prior=model_map, lstm_kw...)
 
     # ---------------------------------------------------------------
     # Compare KL divergences
     # ---------------------------------------------------------------
     models = [
-        ("Infinite-T (degeneracy)", model_mult),
-        ("DuBois 1-param", model_dubois),
-        ("MAP hybrid", model_map),
-        ("Full MaxEnt", model_full),
-        ("LSTM (no prior)", model_lstm_flat),
-        ("LSTM (mult prior)", model_lstm_mult),
-        ("LSTM (DuBois prior)", model_lstm_DuBois),
+        ("Infinite-T", model_mult),
+        ("DuBois κ", model_dubois),
+        ("MAP-on-DuBois", model_map),
+        ("MaxEnt l2=1e-4", model_full),
+        ("LSTM (M(λ) prior)", model_lstm_mult),
+        ("LSTM (DuBois κ prior)", model_lstm_DuBois),
+        ("LSTM (MAP-on-DuBois prior)", model_lstm_MAP),
     ]
+    
+    @printf("\n# Estimates: (including Yakub-Ronchi Jellium background)")
+    @printf("\n\n%-30s KL= %8.4f σ= %8.4f E= %8.2f E/N= %8.4f Ha = %8.4f Ry\n", 
+        "MC",0.0,
+        sigma, MC_E + N*E_bg, (MC_E + N*E_bg) / N, 2*(MC_E + N*E_bg)/ N)
 
-    @printf("%-30s MC_E= %.8f MC_E/N= %.8f Ha = %.8f Ry (includes jellium bg)\n", 
-            "MonteCarloAsCeperleyIntended", 
-            MC_E + N*E_bg, 
-            (MC_E + N*E_bg) / N, 2*(MC_E + N*E_bg) / N)
-
-    println("Model fits:")
     for (label, m) in models
         KL = kl_divergence(m, MC_data)
         avgsign = calculate_reweighted_sign(m, MC_data)
         E = calculate_reweighted_energy(m, MC_data) + N*E_bg
-        @printf("%-30s KL= %.5f nats AvgSign= %.8f E= %.8f E/N= %.8f Ha = %.8f Ry \n", label, KL, avgsign, E, E / N, 2*E/N)
+        @printf("%-30s KL= %8.4f σ= %8.4f E= %8.2f E/N= %8.4f Ha = %8.4f Ry \n", label, KL, avgsign, E, E / N, 2*E/N)
     end
-    println()
-    println("  DuBois:           ", model_dubois)
-    println("  MAP:              ", model_map)
-    println("  MaxEnt:           ", model_full)
-    println("  LSTM (no prior):  ", model_lstm_flat)
-    println("  LSTM (mult):      ", model_lstm_mult)
-    println("  LSTM (DuBois):    ", model_lstm_DuBois)
+    
+    @printf("\n# Models:")
+    for (label,m) in models
+        @printf("%-30s ",label)
+        println(m)
+    end
 
     # ---------------------------------------------------------------
     # Write sector probabilities comparison
@@ -237,20 +231,20 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     q_mult = probabilities(model_mult, MC_data)
     q_dubois = probabilities(model_dubois, MC_data)
     q_full = probabilities(model_full, MC_data)
-    q_lflat = probabilities(model_lstm_flat, MC_data)
     q_lmult = probabilities(model_lstm_mult, MC_data)
     q_ldub = probabilities(model_lstm_DuBois, MC_data)
+    q_lMAP = probabilities(model_lstm_MAP, MC_data)
     n_tot = sum(MC_data.count)
 
     open("PermutationFamily_LSTM_comparison.dat", "w") do io
-        println(io, "# k  count  P_hat  P_mult  P_dubois  P_full  P_lstm_flat  P_lstm_mult  P_lstm_dub  C")
+        println(io, "# k  count  P_hat  P_mult  P_dubois  P_full  P_lstm_mult  P_lstm_DuBois  P_lstm_MAP  PC")
         for k in 1:MC_data.n_families
             c = MC_data.count[k]
             p_hat = c > 0 ? c / n_tot : 0.0
             C_k = C_from_rank(k, N, MC_data.P)
             @printf(io, "%8d  %8d  %.5e  %.5e  %.5e  %.5e  %.5e  %.5e  %.5e  %s\n",
                 k, c, p_hat, q_mult[k], q_dubois[k], q_full[k],
-                q_lflat[k], q_lmult[k], q_ldub[k], string(C_k))
+                q_lmult[k], q_ldub[k], q_lMAP[k], string(C_k))
         end
     end
     println("Wrote PermutationFamily_LSTM_comparison.dat")
@@ -267,7 +261,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
     Nmagic=33
-    magicsteps=5_000_000
+    magicsteps=1_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
