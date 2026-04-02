@@ -70,7 +70,7 @@ end
 
 function calculate_mc_energy(stats::DensePermutationFamilyStats)
     N = stats.N
-    n_z=sum(stats.count)
+    n_z = sum(stats.count)
 
     Etot = 0.0
     Z_sign = 0.0
@@ -104,6 +104,25 @@ function calculate_reweighted_sign(model::AbstractPermutationModel, stats::Dense
     end
     return val
 end
+
+function permutation_histogram_from_stats(stats::DensePermutationFamilyStats)
+    N = stats.N
+    n_z = sum(stats.count)
+
+    hist = zeros(Int, N) # for each cycle
+
+    for k in 1:stats.n_families
+        if stats.count[k] > 0
+            C_k = C_from_rank(k, N, stats.P)
+            for i in 1:N
+                hist[i] += C_k[i] * stats.count[k]
+            end
+        end
+    end
+
+    return hist ./ n_z
+end
+
 function merge_stats(a::DensePermutationFamilyStats, b::DensePermutationFamilyStats)
     a.N == b.N && a.n_families == b.n_families || throw(ArgumentError("merge_stats"))
     DensePermutationFamilyStats(a.N, a.P, a.n_families,
@@ -120,7 +139,7 @@ function permutation_family_mc_chain(sys, params; equil, steps, measure_every, s
     acc = DensePermutationFamilyStats(sys.N)
     for t in 1:steps
         worm_step!(cfg, sys, params)
-        prog !== nothing && t%50==0 && next!(prog)
+        prog !== nothing && t % 50 == 0 && next!(prog)
         if t % measure_every == 0 && cfg.sector == Z_SECTOR
             C_vec = permutation_family_C(cfg)
             E_therm, E_virial = energy_estimators(cfg, sys)
@@ -136,7 +155,7 @@ function permutation_family_mc(sys, params; equil, steps, measure_every, show_pr
     parts = Vector{DensePermutationFamilyStats}(undef, n_chains)
     Threads.@threads for i in 1:n_chains
         nstep = q + (i ≤ r)
-        prog = (show_progress && i == 1) ? Progress(nstep÷50; desc="MC:$(steps/1e6)M") : nothing
+        prog = (show_progress && i == 1) ? Progress(nstep ÷ 50; desc="MC:$(steps/1e6)M") : nothing
         parts[i] = permutation_family_mc_chain(sys, params; equil,
             steps=nstep, measure_every, seed=base + UInt64(i), prog=prog)
     end
@@ -155,18 +174,22 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
 
     # Add Jellium Background; Yakub-Ronchi
     E_bg = yakub_ronchi_background_constant(L, N)
-    @printf("Calculated background N= %d L= %d E= %g\n",N,L,E_bg)
+    @printf("Calculated background N= %d L= %d E= %g\n", N, L, E_bg)
 
     println("Running threaded MC...")
     MC_data = permutation_family_mc(sys, params; equil, steps, measure_every)
-    
+
+    # Calculate permutation histogram from MC data
+    MC_permutation_histogram = permutation_histogram_from_stats(MC_data)
+    @printf("MC_permutation_histogram: %s\n", MC_permutation_histogram)
+
     println("DensePermutationFamilyStats  N=$N  p(N)=$(MC_data.n_families)  ",
-        "size=$(Base.summarysize(MC_data) ÷ 1024) KiB")    
-    n_z=sum(MC_data.count)
+        "size=$(Base.summarysize(MC_data) ÷ 1024) KiB")
+    n_z = sum(MC_data.count)
     @printf("\n# MC Complete! N= %d  r_s= %g θ= %g  n_families= %d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, n_z)
     MC_E, sigma = calculate_mc_energy(MC_data)
-    @printf("# MC_E= %.8f σ=  %.8f MC_E/N= %.8f Ha = %.8f Ry (including Yakub-Ronchi Jellium background)\n", 
-            MC_E + N*E_bg, sigma, (MC_E + N*E_bg) / N, 2*(MC_E + N*E_bg)/ N)
+    @printf("# MC_E= %.8f σ=  %.8f MC_E/N= %.8f Ha = %.8f Ry (including Yakub-Ronchi Jellium background)\n",
+        MC_E + N * E_bg, sigma, (MC_E + N * E_bg) / N, 2 * (MC_E + N * E_bg) / N)
 
     # ---------------------------------------------------------------
     # Exponential family fits
@@ -206,22 +229,22 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         ("LSTM (DuBois κ prior)", model_lstm_DuBois),
         ("LSTM (MAP-on-DuBois prior)", model_lstm_MAP),
     ]
-    
+
     @printf("\n# Estimates: (including Yakub-Ronchi Jellium background)")
-    @printf("\n\n%-30s KL= %8.4f σ= %8.4f E= %8.2f E/N= %8.4f Ha = %8.4f Ry\n", 
-        "MC",0.0,
-        sigma, MC_E + N*E_bg, (MC_E + N*E_bg) / N, 2*(MC_E + N*E_bg)/ N)
+    @printf("\n\n%-30s KL= %8.4f σ= %8.4f E= %8.2f E/N= %8.4f Ha = %8.4f Ry\n",
+        "MC", 0.0,
+        sigma, MC_E + N * E_bg, (MC_E + N * E_bg) / N, 2 * (MC_E + N * E_bg) / N)
 
     for (label, m) in models
         KL = kl_divergence(m, MC_data)
         avgsign = calculate_reweighted_sign(m, MC_data)
-        E = calculate_reweighted_energy(m, MC_data) + N*E_bg
-        @printf("%-30s KL= %8.4f σ= %8.4f E= %8.2f E/N= %8.4f Ha = %8.4f Ry \n", label, KL, avgsign, E, E / N, 2*E/N)
+        E = calculate_reweighted_energy(m, MC_data) + N * E_bg
+        @printf("%-30s KL= %8.4f σ= %8.4f E= %8.2f E/N= %8.4f Ha = %8.4f Ry \n", label, KL, avgsign, E, E / N, 2 * E / N)
     end
-    
+
     @printf("\n# Models:")
-    for (label,m) in models
-        @printf("%-30s ",label)
+    for (label, m) in models
+        @printf("%-30s ", label)
         println(m)
     end
 
@@ -260,15 +283,15 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic=33
-    magicsteps=1_000_000
+    Nmagic =7 
+    magicsteps = 1_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
     # DuBois Table 1: rs=10.0, theta=1.0 (N=33)
     #     Expected E/N: -0.0403 Ha
     MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps)
-    
+
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha
     MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps)
