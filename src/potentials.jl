@@ -131,6 +131,43 @@ end
 
 
 # -----------------------------------------------------------------------------
+# Harmonic Pair Potential
+# -----------------------------------------------------------------------------
+
+Base.@kwdef struct HarmonicPairPotential <: PairPotential
+    k::Float64 = 1.0
+end
+
+(U::HarmonicPairPotential)(r_norm::Float64) = 0.5 * U.k * (r_norm^2)
+(U::HarmonicPairPotential)(r::AbstractVector{<:Real}) = 0.5 * U.k * sum(abs2, r)
+
+Base.show(io::IO, obj::HarmonicPairPotential) = print(io, "HarmonicPairPotential(k=$(obj.k))")
+
+function potential_derivative(U::HarmonicPairPotential, r::AbstractVector{<:Real})
+    return U.k * r
+end
+
+function potential_derivative!(out::AbstractVector, U::HarmonicPairPotential, r::AbstractVector{<:Real})
+    for d in eachindex(r, out)
+        @inbounds out[d] = U.k * r[d]
+    end
+    return out
+end
+
+is_null(U::HarmonicPairPotential) = (U.k == 0.0)
+
+function virial_contribution(U::HarmonicPairPotential, r::AbstractVector)
+    return 2.0 * U(r)
+end
+
+function centroid_virial_term(U::HarmonicPairPotential, rij::AbstractVector, Δcentroid::AbstractVector)
+    s = 0.0
+    @inbounds for d in eachindex(rij, Δcentroid)
+        s += (rij[d] - Δcentroid[d]) * U.k * rij[d]
+    end
+    return s
+end
+# -----------------------------------------------------------------------------
 # Double Well Potential
 # -----------------------------------------------------------------------------
 

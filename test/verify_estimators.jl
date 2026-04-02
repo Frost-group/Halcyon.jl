@@ -36,6 +36,19 @@ Exact thermal energy of a D-dimensional isotropic quantum harmonic oscillator:
 analytical_ho_energy(β, ω; D=3) = D * (ω / 2.0) * coth(β * ω / 2.0)
 
 """
+    analytical_moshinsky_energy(β, λ, k_ext, k_int; D=3)
+
+Exact thermal energy of 2 interacting particles in a D-dimensional harmonic trap.
+The particles have external spring constant `k_ext` and pair spring constant `k_int`.
+"""
+function analytical_moshinsky_energy(β, λ, k_ext, k_int; D=3)
+    ω_com = sqrt(2 * λ * k_ext)
+    ω_rel = sqrt(2 * λ * (k_ext + 2 * k_int))
+    E_com = analytical_ho_energy(β, ω_com; D=D)
+    E_rel = analytical_ho_energy(β, ω_rel; D=D)
+    return E_com + E_rel
+end
+"""
     ho_spring_constant(ω, λ)
 
 Return the HarmonicPotential spring constant `k` that yields oscillator
@@ -56,10 +69,10 @@ Run PIMC worm simulation and compare thermodynamic/virial energy estimators
 against an exact value.  Returns `(; mean_th, mean_vir, E_exact, std_th, std_vir)`.
 """
 function run_estimator_audit(; N=1, D=3, M=100, β=1.0, steps=100_000,
-                             ext::Halcyon.ExternalPotential=HarmonicPotential(k=0.0),
-                             pair::Halcyon.PairPotential=NullPairPotential(),
-                             E_exact::Float64, L=10.0, λ=0.5,
-                             equilibration=100_000, label="custom")
+    ext::Halcyon.ExternalPotential=HarmonicPotential(k=0.0),
+    pair::Halcyon.PairPotential=NullPairPotential(),
+    E_exact::Float64, L=10.0, λ=0.5,
+    equilibration=100_000, label="custom")
 
     sys = System(M, N; D=D, β=β, λ=λ, L=L, V=ext, U=pair)
     params = default_worm_params(sys)
@@ -84,15 +97,15 @@ function run_estimator_audit(; N=1, D=3, M=100, β=1.0, steps=100_000,
     end
 
     mean_th = mean(E_therm_samples)
-    std_th  = std(E_therm_samples) / sqrt(length(E_therm_samples))
+    std_th = std(E_therm_samples) / sqrt(length(E_therm_samples))
     mean_vir = mean(E_vir_samples)
-    std_vir  = std(E_vir_samples) / sqrt(length(E_vir_samples))
+    std_vir = std(E_vir_samples) / sqrt(length(E_vir_samples))
 
     @printf("Analytical E:  %.6f\n", E_exact)
     @printf("Thermodynamic: %.6f ± %.6f  (err %+.2f%%)\n",
-            mean_th, std_th, 100 * (mean_th - E_exact) / E_exact)
+        mean_th, std_th, 100 * (mean_th - E_exact) / E_exact)
     @printf("Virial:        %.6f ± %.6f  (err %+.2f%%)\n",
-            mean_vir, std_vir, 100 * (mean_vir - E_exact) / E_exact)
+        mean_vir, std_vir, 100 * (mean_vir - E_exact) / E_exact)
     @printf("Samples:       %d (from %d MC steps)\n", length(E_vir_samples), steps)
 
     return (; mean_th, mean_vir, E_exact, std_th, std_vir)
@@ -104,57 +117,71 @@ end
 
 @testset "Estimator Audit" begin
     @testset "Free particle (N=1, β=0.1)" begin
-        D = 3; β = 0.1
+        D = 3
+        β = 0.1
         res = run_estimator_audit(D=D, β=β, L=10.0, steps=200_000, label="free",
-                                  ext=HarmonicPotential(k=0.0),
-                                  E_exact=Float64(D / (2β)))
+            ext=HarmonicPotential(k=0.0),
+            E_exact=Float64(D / (2β)))
         @test isapprox(res.mean_vir, res.E_exact, atol=0.1)
     end
 
     @testset "3D QHO (N=1, β=1, ω=1)" begin
-        ω = 1.0; λ = 0.5; β = 1.0; D = 3
+        ω = 1.0
+        λ = 0.5
+        β = 1.0
+        D = 3
         k = ho_spring_constant(ω, λ)
         res = run_estimator_audit(D=D, β=β, L=10.0, steps=200_000, label="QHO-N1",
-                                  ext=HarmonicPotential(k=k),
-                                  E_exact=analytical_ho_energy(β, ω; D=D))
+            ext=HarmonicPotential(k=k),
+            E_exact=analytical_ho_energy(β, ω; D=D))
         @test isapprox(res.mean_vir, res.E_exact, atol=0.15)
     end
 
     @testset "Non-interacting N=2 in 3D QHO" begin
         # High T (β=0.5) to suppress bosonic exchange (~1.5% correction),
         # so E ≈ 2 × E_single tests multi-particle bookkeeping.
-        ω = 1.0; λ = 0.5; β = 0.5; D = 3; N = 2
+        ω = 1.0
+        λ = 0.5
+        β = 0.5
+        D = 3
+        N = 2
         k = ho_spring_constant(ω, λ)
         E_exact = N * analytical_ho_energy(β, ω; D=D)
         res = run_estimator_audit(N=N, D=D, β=β, L=10.0, M=50, steps=200_000,
-                                  label="QHO-N2",
-                                  ext=HarmonicPotential(k=k),
-                                  E_exact=E_exact)
+            label="QHO-N2",
+            ext=HarmonicPotential(k=k),
+            E_exact=E_exact)
         @test isapprox(res.mean_th, res.E_exact, atol=1.0)  # thermo is very noisy at high T
         @test isapprox(res.mean_vir, res.E_exact, atol=0.5)
     end
 
     @testset "Ideal Bose gas (N=4, periodic box)" begin
-        N = 4; D = 3; λ = 0.5; L = 5.0
+        N = 4
+        D = 3
+        λ = 0.5
+        L = 5.0
         β = β_from_λT_ratio(0.5, L, λ)
         E_exact = E_N_exact(N, β, L, λ)
         res = run_estimator_audit(N=N, D=D, β=β, L=L, M=50, steps=300_000,
-                                  equilibration=150_000, label="IdealBose-N4",
-                                  ext=HarmonicPotential(k=0.0),
-                                  E_exact=E_exact)
+            equilibration=150_000, label="IdealBose-N4",
+            ext=HarmonicPotential(k=0.0),
+            E_exact=E_exact)
         @test isapprox(res.mean_vir, res.E_exact, atol=0.5)
     end
 
     @testset "Ideal Fermi gas (N=4, periodic box)" begin
         # Sign-reweighted bosonic PIMC: ⟨E⟩_F = ⟨E·S⟩_B / ⟨S⟩_B
         # Moderate degeneracy (λ_T/L = 0.5) keeps the average sign manageable.
-        N = 4; D = 3; λ = 0.5; L = 5.0
+        N = 4
+        D = 3
+        λ = 0.5
+        L = 5.0
         β = β_from_λT_ratio(0.5, L, λ)
         E_exact_F = E_N_exact_Fermi(N, β, L, λ)
 
         sys = System(50, N; D=D, β=β, λ=λ, L=L,
-                     V=HarmonicPotential(k=0.0), U=NullPairPotential(),
-                     statistics=Fermions)
+            V=HarmonicPotential(k=0.0), U=NullPairPotential(),
+            statistics=Fermions)
         params = default_worm_params(sys)
         cfg = WormConfiguration(sys)
 
@@ -163,7 +190,7 @@ end
         end
 
         ES_samples = Float64[]
-        S_samples  = Float64[]
+        S_samples = Float64[]
         for t in 1:300_000
             worm_step!(cfg, sys, params)
             if t % 5 == 0 && cfg.sector == Z_SECTOR
@@ -175,15 +202,15 @@ end
         end
 
         mean_ES = mean(ES_samples)
-        mean_S  = mean(S_samples)
+        mean_S = mean(S_samples)
         E_vir_F = mean_ES / mean_S
-        n_samp  = length(S_samples)
+        n_samp = length(S_samples)
 
         @printf("\n--- Audit: IdealFermi-N4  N=%d D=%d M=50 β=%.2f L=%.1f ---\n", N, D, β, L)
         @printf("Exact E_F: %.6f\n", E_exact_F)
         @printf("⟨S⟩ = %.4f  (n=%d)\n", mean_S, n_samp)
         @printf("Virial (reweighted): %.6f  (err %+.2f%%)\n",
-                E_vir_F, 100 * (E_vir_F - E_exact_F) / E_exact_F)
+            E_vir_F, 100 * (E_vir_F - E_exact_F) / E_exact_F)
 
         @test mean_S > 0.05   # sign problem not catastrophic
         @test isapprox(E_vir_F, E_exact_F, atol=0.5)
@@ -192,15 +219,40 @@ end
     @testset "Hookium (N=2, k=1/4, g=1, E₀=2)" begin
         # Taut 1993: 2 electrons in HO + Coulomb, k=1/4 ⟹ E₀ = 2.0 Eₕ exactly.
         # Spatial ground state is symmetric (singlet) so bosonic PIMC suffices.
-        N = 2; D = 3; λ = 0.5; L = 20.0
-        β = 20.0; M = 200
+        N = 2
+        D = 3
+        λ = 0.5
+        L = 20.0
+        β = 20.0
+        M = 200
         k_ho = 0.25
         res = run_estimator_audit(N=N, D=D, β=β, L=L, M=M, steps=500_000,
-                                  equilibration=200_000, label="Hookium",
-                                  ext=HarmonicPotential(k=k_ho),
-                                  pair=CoulombPotential(g=1.0),
-                                  E_exact=2.0)
+            equilibration=200_000, label="Hookium",
+            ext=HarmonicPotential(k=k_ho),
+            pair=CoulombPotential(g=1.0),
+            E_exact=2.0)
         @test isapprox(res.mean_th, 2.0, atol=0.1)
         @test isapprox(res.mean_vir, 2.0, atol=0.15)
     end
+
+    @testset "Moshinsky Atom (N=2, Harmonic Trap + Harmonic Pair)" begin
+        N = 2
+        D = 3
+        λ = 0.5
+        L = 20.0
+        β = 1.0
+        M = 50
+        k_ext = 1.0
+        k_int = 0.5
+        E_exact = analytical_moshinsky_energy(β, λ, k_ext, k_int; D=D)
+        res = run_estimator_audit(N=N, D=D, β=β, L=L, M=M, steps=200_000,
+            equilibration=100_000, label="Moshinsky",
+            ext=HarmonicPotential(k=k_ext),
+            pair=HarmonicPairPotential(k=k_int),
+            E_exact=E_exact)
+        @test isapprox(res.mean_th, E_exact, atol=0.1)
+        @test isapprox(res.mean_vir, E_exact, atol=0.1)
+    end
 end
+
+

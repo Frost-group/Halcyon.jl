@@ -19,7 +19,7 @@ export QuantumStatistics, Boltzmannons, Bosons, Fermions
 
 # Potentials
 export AbstractPotential, ExternalPotential, PairPotential
-export HarmonicPotential, DoubleWellPotential
+export HarmonicPotential, DoubleWellPotential, HarmonicPairPotential
 export LennardJonesPotential, CoulombPotential, YakubRonchiPotential, YukawaPotential
 export yakub_ronchi_r_cut, yakub_ronchi_phi
 export yakub_ronchi_background_constant
