@@ -218,6 +218,7 @@ struct DensePermutationFamilyStats
     n_families::Int
     count::Vector{Int64}
     estimator::Vector{Float64}
+    estimator2::Vector{Float64}
 end
 # FIXME: now immutable struct, but still have count & estimator as mutable vectors?
 #  Not sure if this is still a problem? Or whether once instantiated, Julia kmows everything there is to know 
@@ -225,7 +226,7 @@ end
 function DensePermutationFamilyStats(N::Int)
     P = integer_partition_count_table(N)
     pn = P[N+1, N+1]
-    DensePermutationFamilyStats(N, P, pn, zeros(Int64, pn), zeros(Float64, pn))
+    DensePermutationFamilyStats(N, P, pn, zeros(Int64, pn), zeros(Float64, pn), zeros(Float64, pn))
 end
 
 """
@@ -238,6 +239,7 @@ function observe_permutation_family!(acc::DensePermutationFamilyStats, C::Vector
     k = C_to_rank(C, acc.P, acc.N)
     acc.count[k] += 1
     acc.estimator[k] += E
+    acc.estimator2[k] += E^2
 end
 
 # ===================================================================
