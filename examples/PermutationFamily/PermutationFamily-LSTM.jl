@@ -11,6 +11,7 @@ using Printf
 using ProgressMeter
 using Random
 using LinearAlgebra
+using Flux
 
 """Wigner-Seitz density n = 3/(4π r_s³) in 3D (atomic units)."""
 ueg_density_3d(r_s::Float64) = 3.0 / (4π * r_s^3)
@@ -52,6 +53,133 @@ function eval_energy(model::LinearEnergyModel, C::Vector{Int})
     return dot(model.E_l, C)
 end
 
+# Fallback wrapper for linear model and any future non-cached models; directly eval
+eval_energy_at_rank(en_model::AbstractEnergyModel, k::Int, C_k::Vector{Int}) = eval_energy(en_model, C_k)
+
+# ===================================================================
+# LSTMEnergyResidualModel (simple dense network on top of pre-trained permutation LSTM model)
+# ===================================================================
+
+struct LSTMEnergyResidualModel{P<:AbstractPermutationModel,L<:LinearEnergyModel} <: AbstractEnergyModel
+    linear_baseline::L
+    prob_trunk::P      # Permutation probability model; LSTM (I'm not sure if we could use an exp model, as then no state vector to learn off?)
+    energy_head::Chain # The dense MLP to train mapping representation to Delta E
+    cached_energies::Vector{Float64} # O(1) lookup over all families
+end
+
+Flux.@layer LSTMEnergyResidualModel trainable = (energy_head,)
+
+# Fast path evaluation using precomputed cached_energies
+eval_energy_at_rank(en_model::LSTMEnergyResidualModel, k::Int, C_k::Vector{Int}) = en_model.cached_energies[k]
+eval_energy(model::LSTMEnergyResidualModel, C::Vector{Int}) = error("Use eval_energy_at_rank")
+
+function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linear_model::LinearEnergyModel, stats::DensePermutationFamilyStats;
+    hidden_layers=(32,), lr=1e-3, epochs=500)
+
+    N = stats.N
+    # 1. Steal the permutation LSTM data setup; this is what it was trained on
+    Xs, Ys_oh, _, M_vals = Halcyon._build_training_data(stats)
+
+    trunk = prob_model.chain[1:end-1]
+    Flux.testmode!(trunk)
+
+    # Xs is (N, n_obs). trunk outputs (n_hidden, N, n_obs) in Flux
+    hidden_seq = trunk(Xs)
+    h_final = hidden_seq[:, end, :] # (n_hidden, n_obs) - the terminal representation
+    n_hidden_in = size(h_final, 1) # dimension of hidden representation to be fed into our NN
+
+    # 2. Build explicit numeric WLS (Weighted Least Squares) residual targets
+    n_obs = count(c -> c > 0, stats.count)
+    delta_E = zeros(Float32, 1, n_obs)
+    E_raw = zeros(Float32, n_obs)
+    W_arr = zeros(Float32, n_obs)
+
+    # bit painful this really; not sure if I should fill with dummy values or whatever... once we get N>100, we'll need to be more clever generally
+    idx = 1
+    for k in 1:stats.n_families
+        c_k = stats.count[k]
+        if c_k > 0
+            E_mean = stats.estimator[k] / c_k
+            E_raw[idx] = Float32(E_mean)
+
+            C_k = C_from_rank(k, N, stats.P)
+            E_lin = eval_energy(linear_model, C_k)
+
+            delta_E[1, idx] = Float32(E_mean - E_lin)
+
+            W_arr[idx] = Float32(c_k) # now directly using MC counts... incorporating variance blew out atteniont to trivial regions
+            idx += 1
+        end
+    end
+
+    W_arr ./= sum(W_arr) # rescale for stable gradient magnitudes
+
+    # 3. Construct purely unregularised scalar regression head
+    layers = []
+    in_dim = n_hidden_in
+    for h in hidden_layers
+        if h > 0
+            push!(layers, Dense(in_dim => h, relu))
+            in_dim = h
+        end
+    end
+    push!(layers, Dense(in_dim => 1))
+
+    head = Chain(layers...)
+    opt_state = Flux.setup(Adam(lr), head)
+
+    # Weighted Least Squares Loss over the empirical delta batch
+    wls_loss(m, x, y, w) = sum(w' .* (m(x) .- y) .^ 2)
+
+    println("  Training Energy Head: ", head)
+    for epoch in 1:epochs
+        grad = Flux.gradient(head) do m
+            wls_loss(m, h_final, delta_E, W_arr)
+        end
+        Flux.update!(opt_state, head, grad[1])
+
+        if epoch % 100 == 0 || epoch == 1 # trains super fast as so simple
+            l = wls_loss(head, h_final, delta_E, W_arr)
+            @printf("  LSTM Energy Head (Layers %s) epoch %d/%d  WLS-MSE = %.2e\n", string(hidden_layers), epoch, epochs, Float64(l))
+        end
+    end
+    Flux.testmode!(head)
+
+    # Calculate Total Energy Model R² for telemetry
+    pred_delta = Float64.(head(h_final))
+    # E_total_pred = E_lin + Delta_pred = (E_raw - delta_E_target) + Delta_pred
+    y_pred_total = vec(E_raw) .- vec(delta_E) .+ vec(pred_delta)
+
+    WSSR = sum(W_arr .* (vec(E_raw) .- y_pred_total) .^ 2)
+    y_mean_w = sum(W_arr .* vec(E_raw)) / max(sum(W_arr), 1e-12)
+    WTSS = sum(W_arr .* (vec(E_raw) .- y_mean_w) .^ 2)
+    R2_W = 1.0 - (WSSR / max(WTSS, 1e-12))
+
+    @printf("  LSTM %s achieves Total Weighted R² = %2.3f %%\n", string(hidden_layers), 100 * R2_W)
+
+    # 4. Cache evaluations over ALL permutation families; probably should move this into separate function
+    Cmat = Halcyon.cycle_count_matrix(stats)
+    bos = Int32(N + 2)
+
+    xs = zeros(Int32, N, stats.n_families)
+    for idx in 1:stats.n_families
+        xs[1, idx] = bos
+        C_counts = view(Cmat, idx, :)
+        for t in 2:N
+            k_prev = N - (t - 1) + 1
+            xs[t, idx] = Int32(C_counts[k_prev] + 1)
+        end
+    end
+
+    h_f = trunk(xs)[:, end, :] # (hidden, n_families)
+    delta_E_pred = Float64.(head(h_f)) # (1, n_families)
+
+    cached_energies = [eval_energy(linear_model, C_from_rank(idx, N, stats.P)) + delta_E_pred[1, idx]
+                       for idx in 1:stats.n_families]
+
+    return LSTMEnergyResidualModel(linear_model, prob_model, head, cached_energies)
+end
+
 function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutationFamilyStats; λ_ridge=1e-6)
     N = stats.N
     n_visited = count(c -> c > 0, stats.count)
@@ -79,13 +207,7 @@ function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutatio
             y[idx] = E_mean
 
             # Linear-squares weight = N_k / Var_k: nb: currently just taking MC sample variance
-            if count > 1
-                var_k = (stats.estimator2[k] - count * E_mean^2) / (count - 1)
-                var_k = max(var_k, 1e-12) # Safeguard against identical samples
-                W[idx] = count / var_k
-            else
-                W[idx] = count
-            end
+            W[idx] = count # now directly using MC counts ONLY
             idx += 1
         end
     end
@@ -127,10 +249,12 @@ function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutatio
 
     # --- Telemetry & Fit Quality ---
     y_pred = X_gf * coeffs
-    WSSR = sum(W .* (y .- y_pred) .^ 2)
+    WSSR = sum(W .* (y .- y_pred) .^ 2) # weighted sum of squared residuals
     y_mean_w = sum(W .* y) / max(sum(W), 1e-12)
-    WTSS = sum(W .* (y .- y_mean_w) .^ 2)
+    WTSS = sum(W .* (y .- y_mean_w) .^ 2) # weighted total sum of squares
+    # OK, so additional (beyond mean-field) variance we do not fit
     R2_W = 1.0 - (WSSR / max(WTSS, 1e-12))
+
 
     H_inv = inv(H)
     # Extract variances of reconstructed E_l
@@ -144,7 +268,7 @@ function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutatio
     end
 
     @printf("Linear Model Telemetry: E_MF= %8.4f\n", E_MF)
-    @printf("  Linear model acheives, Weighted R² = % .6f\n", R2_W)
+    @printf("  Linear model acheives, Weighted R² = % 2.3f %%\n", 100 * R2_W)
     @printf("  E_l \t RawValue \t\t E_correlation \t Std Error\n")
     for l in 1:min(8, N)
         @printf("  E_%-2d \t %8.4f \t %8.4f \t %8.4f\n", l, E_l[l], (E_l[l] - l * E_l[1]), se_E_l[l])
@@ -188,7 +312,7 @@ function calculate_reweighted_energy(prob_model::AbstractPermutationModel, en_mo
     Z_sign = 0.0
     for k in 1:stats.n_families
         C_k = C_from_rank(k, N, stats.P) # grab the permutation-family / cycle vector
-        E_k = eval_energy(en_model, C_k) # this is a dot product for a linear model: additive energy
+        E_k = eval_energy_at_rank(en_model, k, C_k) # extracted efficiently if cached
         # expectation is that we will need to fit an LSTM for the win
 
         n_cycles = sum(C_k)
@@ -360,6 +484,15 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     model_lstm_MAP = fit(LSTMPermutationModel, MC_data; prior=model_map, lstm_kw...)
 
     # ---------------------------------------------------------------
+    # Extracted Energy LSTM Runs
+    # ---------------------------------------------------------------
+    println("\nTraining Shallow Energy Head on MAP-on-DuBois LSTM trunk...")
+    lstm_energy_shallow = fit_LSTMEnergyResidualModel(model_lstm_MAP, linearEmodel, MC_data; hidden_layers=(), epochs=500)
+
+    println("\nTraining Deep Energy Head on MAP-on-DuBois LSTM trunk...")
+    lstm_energy_deep = fit_LSTMEnergyResidualModel(model_lstm_MAP, linearEmodel, MC_data; hidden_layers=(32,), epochs=500)
+
+    # ---------------------------------------------------------------
     # Compare KL divergences
     # ---------------------------------------------------------------
     models = [
@@ -383,9 +516,11 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         avgsign = calculate_reweighted_sign(m, MC_data)
         E = calculate_reweighted_energy(m, MC_data) + (N * E_bg)
         E_lin = calculate_reweighted_energy(m, linearEmodel, MC_data) + (N * E_bg)
+        E_shallow = calculate_reweighted_energy(m, lstm_energy_shallow, MC_data) + (N * E_bg)
+        E_deep = calculate_reweighted_energy(m, lstm_energy_deep, MC_data) + (N * E_bg)
 
-        @printf("%-30s KL= %8.4f σ= %8.4f E_MC= %8.5f E_lin= %8.5f E_MC/N(Ry)=%8.4f Ry E_lin/N(Ry)=%8.4f Ry\n",
-            label, KL, avgsign, E, E_lin, 2 * E / N, 2 * E_lin / N)
+        @printf("%-30s KL=%8.4f σ=% 8.4f \n\tE_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
+            label, KL, avgsign, 2 * E / N, 2 * E_lin / N, 2 * E_shallow / N, 2 * E_deep / N)
     end
 
     @printf("\n# Models:")
@@ -433,10 +568,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
     magicsteps = 10_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
-    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
+    #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
     # DuBois Table 1: rs=10.0, theta=1.0 (N=33)
     #     Expected E/N: -0.0403 Ha
-    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps)
+    #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps)
 
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha
