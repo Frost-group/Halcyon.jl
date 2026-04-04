@@ -23,8 +23,7 @@ export HarmonicPotential, DoubleWellPotential, HarmonicPairPotential
 export LennardJonesPotential, CoulombPotential, YakubRonchiPotential, YukawaPotential
 export yakub_ronchi_r_cut, yakub_ronchi_phi
 export yakub_ronchi_background_constant
-export HardSpherePotential, AzizPotential, NullPairPotential
-export cao_berne_ratio
+export AzizPotential, NullPairPotential
 
 # Worm algorithm moves
 export translate!, redraw!, open!, close!, swap!, move_head!, move_tail!, worm_step!

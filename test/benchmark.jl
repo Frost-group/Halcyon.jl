@@ -18,7 +18,7 @@ function run_benchmarks()
 
         # Hard-sphere liquid - Cao-Berne test
         (name="Case C: Hard-Sphere Liquid", N=64, M=64, D=3, L=20.0,
-            V=HarmonicPotential(k=0.0), U=HardSpherePotential(a=1.0)),
+            V=HarmonicPotential(k=0.0), U=NullPairPotential()),
 
         # Dornheim 2019: Harmonic trap + Coulomb (2D quantum dot)
         (name="Case D: Harmonic Trap + Coulomb (Dornheim)", N=6, M=100, D=2, L=5.0,
@@ -66,7 +66,7 @@ function run_benchmarks()
     for N_val in [1, 10, 32, 64, 128]
         L = max(5.0, (N_val)^(1 / 3) * 3.0)  # Scale L with N
         sys = System(32, N_val; m=1.0, D=3, β=1.0,
-            V=HarmonicPotential(k=0.0), U=HardSpherePotential(a=1.0), λ=0.5, L=L)
+            V=HarmonicPotential(k=0.0), U=NullPairPotential(), λ=0.5, L=L)
         cfg = WormConfiguration(sys)
         energy_estimators(cfg, sys)  # Warmup
         t = @belapsed energy_estimators($cfg, $sys)
@@ -80,7 +80,7 @@ function run_benchmarks()
 
     for M_val in [16, 32, 64, 128, 256]
         sys = System(M_val, 10; m=1.0, D=3, β=1.0,
-            V=HarmonicPotential(k=0.0), U=HardSpherePotential(a=1.0), λ=0.5, L=10.0)
+            V=HarmonicPotential(k=0.0), U=NullPairPotential(), λ=0.5, L=10.0)
         cfg = WormConfiguration(sys)
         energy_estimators(cfg, sys)  # Warmup
         t = @belapsed energy_estimators($cfg, $sys)

@@ -375,7 +375,6 @@ function get_interaction_action(cfg::WormConfiguration{D}, sys::System{D}, i::In
     end
 
     λ, δτ = sys.λ, sys.τ
-    a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
 
     # BRANCH REMOVAL: Specialise the loop based on whether j+1 is an endpoint
     if j < M - 1
@@ -394,17 +393,8 @@ function get_interaction_action(cfg::WormConfiguration{D}, sys::System{D}, i::In
 
             d2_j = sum(abs2, dx_j)
             d2_next = sum(abs2, dx_n)
-            dot_prod = dot(dx_j, dx_n)
 
-            if sys.U isa HardSpherePotential
-                ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
-                if ratio <= 0.0
-                    return Inf
-                end
-                action -= log(ratio)
-            else
-                action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
-            end
+            action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
         end
     else
         # SLOW PATH: At least one bead is an endpoint (derived)
@@ -422,17 +412,8 @@ function get_interaction_action(cfg::WormConfiguration{D}, sys::System{D}, i::In
 
             d2_j = sum(abs2, dx_j)
             d2_next = sum(abs2, dx_n)
-            dot_prod = dot(dx_j, dx_n)
 
-            if sys.U isa HardSpherePotential
-                ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
-                if ratio <= 0.0
-                    return Inf
-                end
-                action -= log(ratio)
-            else
-                action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
-            end
+            action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
         end
     end
     return action
@@ -456,7 +437,6 @@ function get_interaction_action_external(cfg::WormConfiguration{D}, sys::System{
     end
 
     λ, δτ = sys.λ, sys.τ
-    a_hs = sys.U isa HardSpherePotential ? sys.U.a : 0.0
 
     if j < M - 1
         ri_j = SVector{D,Float64}(ntuple(d -> cfg.r[i, j+1, d], D))
@@ -473,17 +453,8 @@ function get_interaction_action_external(cfg::WormConfiguration{D}, sys::System{
 
             d2_j = sum(abs2, dx_j)
             d2_next = sum(abs2, dx_n)
-            dot_prod = dot(dx_j, dx_n)
 
-            if sys.U isa HardSpherePotential
-                ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
-                if ratio <= 0.0
-                    return Inf
-                end
-                action -= log(ratio)
-            else
-                action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
-            end
+            action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
         end
     else
         ri_j = get_bead_svec(cfg, i, j, L)
@@ -500,17 +471,8 @@ function get_interaction_action_external(cfg::WormConfiguration{D}, sys::System{
 
             d2_j = sum(abs2, dx_j)
             d2_next = sum(abs2, dx_n)
-            dot_prod = dot(dx_j, dx_n)
 
-            if sys.U isa HardSpherePotential
-                ratio = cao_berne_ratio(sqrt(d2_j), sqrt(d2_next), dot_prod, a_hs, λ, δτ)
-                if ratio <= 0.0
-                    return Inf
-                end
-                action -= log(ratio)
-            else
-                action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
-            end
+            action += (sys.U(sqrt(d2_j)) + sys.U(sqrt(d2_next))) * 0.5 * δτ
         end
     end
     return action
