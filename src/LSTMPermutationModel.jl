@@ -284,7 +284,8 @@ end
 
 function fit(::Type{LSTMPermutationModel}, stats::DensePermutationFamilyStats;
              prior::AbstractPermutationModel=MultiplicityModel(zeros(stats.N)),
-             n_embed::Int=16, n_hidden::Int=64, epochs::Int=100, lr::Float64=1e-3)
+             n_embed::Int=16, n_hidden::Int=64, n_layers::Int=2,
+             epochs::Int=100, lr::Float64=1e-3)
     N = stats.N
     vocab_size = N + 2
 
@@ -292,10 +293,13 @@ function fit(::Type{LSTMPermutationModel}, stats::DensePermutationFamilyStats;
     log_dp_table, log_f = _build_log_dp_table(prior, N)
     println("  DP Table built. log Z[N, N] = $(round(log_dp_table[N, N+1], digits=6))")
 
+    lstm_stack = Any[LSTM(n_embed => n_hidden)]
+    for _ in 2:n_layers
+        push!(lstm_stack, LSTM(n_hidden => n_hidden))
+    end
     chain = Chain(
         Embedding(vocab_size => n_embed),
-        LSTM(n_embed => n_hidden),
-        LSTM(n_hidden => n_hidden),
+        lstm_stack...,
         Dense(n_hidden => vocab_size))
 
     Xs, Ys_oh, weights, M_vals = _build_training_data(stats)
