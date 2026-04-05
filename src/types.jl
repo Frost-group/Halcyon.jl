@@ -111,3 +111,25 @@ Fields:
     j_max::Int = 50       # Max segment length
     r_max::Float64 = 2.0  # Max displacement
 end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Importance Sampling Bias (struct only; constructor in PermutationFamily.jl)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+    PermutationBias
+
+Precomputed bias table for importance sampling of permutation sectors.
+Biases swap! acceptance by p_old^α / p_new^α to flatten the sector histogram.
+
+Fields:
+- `P::Matrix{Int}`:        partition count table (for C_to_rank)
+- `log_p::Vector{Float64}`: log(p_model[k]) for each sector rank k ∈ 1:p(N)
+- `α::Float64`:            softening exponent; α=1 full bias, α=0 unbiased
+"""
+struct PermutationBias
+    P::Matrix{Int}
+    log_p::Vector{Float64}
+    α::Float64
+end
+

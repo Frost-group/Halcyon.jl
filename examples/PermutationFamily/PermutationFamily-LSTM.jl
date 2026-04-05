@@ -267,12 +267,14 @@ function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutatio
         se_E_l[l] = sqrt(max(var_l, 0.0))
     end
 
-    @printf("Linear Model Telemetry: E_MF= %8.4f\n", E_MF)
-    @printf("  Linear model acheives, Weighted R² = % 2.3f %%\n", 100 * R2_W)
+    @printf("fit_LinearEnergyModel: E_MF= %8.4f\n", E_MF)
+
     @printf("  E_l \t RawValue \t\t E_correlation \t Std Error\n")
     for l in 1:min(8, N)
         @printf("  E_%-2d \t %8.4f \t %8.4f \t %8.4f\n", l, E_l[l], (E_l[l] - l * E_l[1]), se_E_l[l])
     end
+
+    @printf("  Linear model Weighted R² = % 2.3f %%\n", 100 * R2_W)
 
     return LinearEnergyModel(E_l)
 end
@@ -386,6 +388,61 @@ function merge_stats(a::DensePermutationFamilyStats, b::DensePermutationFamilySt
         a.count .+ b.count, a.estimator .+ b.estimator, a.estimator2 .+ b.estimator2)
 end
 
+# ===================================================================
+# Importance Sampling: post-MC debiasing
+# ===================================================================
+
+"""
+    debiased_empirical_probabilities(stats, bias) -> Vector{Float64}
+
+Recover true sector probabilities from biased MC counts.
+Under bias 1/p^α, raw counts satisfy n_k ∝ π_k / p_k^α.
+True probabilities: π̂_k = n_k · p_k^α / Σ_j n_j · p_j^α.
+"""
+function debiased_empirical_probabilities(stats::DensePermutationFamilyStats,
+    bias::Union{Nothing,PermutationBias})
+    if bias === nothing
+        return empirical_probabilities(stats)
+    end
+    w = zeros(Float64, stats.n_families)
+    for k in 1:stats.n_families
+        if stats.count[k] > 0
+            w[k] = stats.count[k] * exp(bias.α * bias.log_p[k])
+        end
+    end
+    Σ = sum(w)
+    Σ == 0 && error("No observations recorded")
+    return w ./ Σ
+end
+
+"""
+    debiased_mc_energy(stats, bias) -> (E, avg_sign)
+
+Fermion energy estimator from biased MC data.
+Debiased sector probabilities × raw conditional-mean energies.
+"""
+function debiased_mc_energy(stats::DensePermutationFamilyStats,
+    bias::Union{Nothing,PermutationBias})
+    p_hat = debiased_empirical_probabilities(stats, bias)
+    N = stats.N
+
+    Etot = 0.0
+    Z_sign = 0.0
+    for k in 1:stats.n_families
+        if stats.count[k] > 0
+            E_k = stats.estimator[k] / stats.count[k]
+
+            C_k = C_from_rank(k, N, stats.P)
+            n_cycles = sum(C_k)
+            σ = iseven(N - n_cycles) ? 1.0 : -1.0
+
+            Etot += σ * p_hat[k] * E_k
+            Z_sign += σ * p_hat[k]
+        end
+    end
+    return Etot / Z_sign, Z_sign
+end
+
 """Equilibrate once, run `steps` production steps, return partial stats."""
 function permutation_family_mc_chain(sys, params; equil, steps, measure_every, seed::UInt64, prog=nothing)
     Random.seed!(seed)
@@ -421,7 +478,7 @@ end
 
 
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-    equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=5,
+    equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=1,
     lstm_epochs::Int=200, lstm_hidden::Int=64, lstm_embed::Int=16,
     lstm_lr::Float64=1e-3)
     λħ = 0.5
@@ -429,9 +486,11 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=YakubRonchiPotential(L=L, g=1))
     params = default_worm_params(sys)
 
+    @printf("|>|>|>|>|>0> WORM: N= %d θ= %g r_s= %g (L= %g β= %g λ= %g) \n", N, θ, r_s, L, β, λħ)
+
     # Add Jellium Background; Yakub-Ronchi
     E_bg = yakub_ronchi_background_constant(L, N)
-    @printf("Calculated background N= %d L= %d E= %g\n", N, L, E_bg)
+    @printf("Calculated Yakub-Ronchi background N= %d L= %g E= %g Ha\n", N, L, E_bg)
 
     println("Running threaded MC...")
     MC_data = permutation_family_mc(sys, params; equil, steps, measure_every)
@@ -441,7 +500,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
 
     # Calculate permutation histogram from MC data
     MC_permutation_histogram = permutation_histogram_from_stats(MC_data)
-    @printf("MC_permutation_histogram: %s\n", MC_permutation_histogram)
+    @printf("MC P(ℓ): [%s]\n", join([@sprintf("%.4f", x) for x in MC_permutation_histogram], ", "))
 
     println("DensePermutationFamilyStats  N=$N  p(N)=$(MC_data.n_families)  ",
         "size=$(Base.summarysize(MC_data) ÷ 1024) KiB")
@@ -519,8 +578,13 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         E_shallow = calculate_reweighted_energy(m, lstm_energy_shallow, MC_data) + (N * E_bg)
         E_deep = calculate_reweighted_energy(m, lstm_energy_deep, MC_data) + (N * E_bg)
 
-        @printf("%-30s KL=%8.4f σ=% 8.4f \n\tE_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
-            label, KL, avgsign, 2 * E / N, 2 * E_lin / N, 2 * E_shallow / N, 2 * E_deep / N)
+        #        @printf("%-30s KL=%8.4f σ=% 8.4f \n\tE_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
+        #            label, KL, avgsign, 2 * E / N, 2 * E_lin / N, 2 * E_shallow / N, 2 * E_deep / N)
+
+        @printf("  %-30s KL=%8.4f σ=% 8.4f | E_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
+            label, KL, avgsign,
+            2 * E / N, 2 * E_lin / N, 2 * E_shallow / N, 2 * E_deep / N)
+
     end
 
     @printf("\n# Models:")
@@ -528,6 +592,63 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         @printf("%-30s ", label)
         println(m)
     end
+
+    # ===============================================================
+    # Importance-sampled MC using fitted model as bias
+    # ===============================================================
+    bias_α = 0.5  # gentle softening; α=1.0 for full flat-histogram; sort of Wang-Landau
+    # experiments showed α=1.0 was terrible - threw MC into the OPPOSITE undersampling, i.e.
+    # forced condensation if not present
+    bias = make_permutation_bias(model_lstm_MAP, MC_data; α=bias_α)
+
+    println("\n#### Biased MC (α=$bias_α, model=LSTM-MAP) ####")
+    params_biased = default_worm_params(sys)
+    params_biased.bias = bias
+
+    MC_biased = permutation_family_mc(sys, params_biased; equil, steps, measure_every)
+
+    MC_biased_permutation_histogram = permutation_histogram_from_stats(MC_biased)
+    @printf("MC Biased P(ℓ): [%s]\n", join([@sprintf("%.4f", x) for x in MC_biased_permutation_histogram], ", "))
+
+    MC_data_visited = count(>(0), MC_data.count)
+    MC_biased_visited = count(>(0), MC_biased.count)
+    @printf("  Unbiased: visited %d / %d sectors (%d Z-samples)\n",
+        MC_data_visited, MC_data.n_families, sum(MC_data.count))
+    @printf("  Biased:   visited %d / %d sectors (%d Z-samples)\n",
+        MC_biased_visited, MC_biased.n_families, sum(MC_biased.count))
+
+    # ── Debiased energy estimator ──
+    E_debiased, sign_debiased = debiased_mc_energy(MC_biased, bias)
+    println("> probability factor of one to one ... we have normality, I repeat we  have  normality.")
+    @printf("  E_MC_debiased = %.8f  σ=%.4f  E/N= %.8f Ha = %.8f Ry\n",
+        E_debiased + N * E_bg, sign_debiased,
+        (E_debiased + N * E_bg) / N, 2 * (E_debiased + N * E_bg) / N)
+
+    # ── Refit energy models on biased data (for better rare-sector coverage?) ──
+    println("\n  Refitting Linear Energy Model on biased data...")
+    linearEmodel_biased = fit_LinearEnergyModel(LinearEnergyModel, MC_biased)
+
+    println("  Refitting LSTM Energy Heads on biased data...")
+    lstm_energy_shallow_biased = fit_LSTMEnergyResidualModel(
+        model_lstm_MAP, linearEmodel_biased, MC_biased; hidden_layers=(), epochs=500)
+    lstm_energy_deep_biased = fit_LSTMEnergyResidualModel(
+        model_lstm_MAP, linearEmodel_biased, MC_biased; hidden_layers=(32,), epochs=500)
+
+    @printf("\n# Biased MC Energy Estimates (α=%.2f, debiased):\n", bias_α)
+    @printf("%-30s  σ=% 8.4f  E/N= % 8.4f Ry (debiased MC)\n",
+        "Debiased MC", sign_debiased, 2 * (E_debiased + N * E_bg) / N)
+
+    for (label, m) in models
+        E_mc_b = calculate_reweighted_energy(m, MC_biased) + (N * E_bg)
+        E_lin_b = calculate_reweighted_energy(m, linearEmodel_biased, MC_biased) + (N * E_bg)
+        E_shal_b = calculate_reweighted_energy(m, lstm_energy_shallow_biased, MC_biased) + (N * E_bg)
+        E_deep_b = calculate_reweighted_energy(m, lstm_energy_deep_biased, MC_biased) + (N * E_bg)
+
+        @printf("  %-30s E_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
+            label, 2 * E_mc_b / N, 2 * E_lin_b / N, 2 * E_shal_b / N, 2 * E_deep_b / N)
+    end
+
+    @printf("\n# Biased MC Estimates (α=%.2f, debiased):\n", bias_α)
 
     # ---------------------------------------------------------------
     # Write sector probabilities comparison
@@ -553,7 +674,8 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     end
     println("Wrote PermutationFamily_LSTM_comparison.dat")
 
-    return MC_data, models
+
+    return MC_data, MC_biased, bias, models
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
@@ -564,14 +686,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 33
-    magicsteps = 10_000_000
+    Nmagic = 7
+    magicsteps = 1_000_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
-    #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
+    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
     # DuBois Table 1: rs=10.0, theta=1.0 (N=33)
     #     Expected E/N: -0.0403 Ha
-    #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps)
+    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps)
 
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha

@@ -59,5 +59,7 @@ export log_multiplicities, cycle_count_matrix, empirical_probabilities
 export AbstractPermutationModel, MultiplicityModel, DuBoisModel, MaxEntModel, MAPHybridModel
 export LSTMPermutationModel
 export fit, probabilities, kl_divergence
+# Importance sampling
+export PermutationBias, make_permutation_bias
 
 end # module

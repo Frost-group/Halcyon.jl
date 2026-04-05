@@ -468,4 +468,20 @@ function fit(::Type{MAPHybridModel}, stats::DensePermutationFamilyStats;
     MAPHybridModel(prior, τ₀, δ, θ)
 end
 
+# ===================================================================
+# Importance Sampling: PermutationBias constructor
+# (struct defined in types.jl for include-order reasons)
+# ===================================================================
+
+"""
+    make_permutation_bias(model, stats; α=1.0) -> PermutationBias
+
+Construct a bias table from a fitted AbstractPermutationModel.
+"""
+function make_permutation_bias(model::AbstractPermutationModel,
+                                stats::DensePermutationFamilyStats; α::Float64=1.0)
+    q = probabilities(model, stats)
+    log_p = [q[k] > 0 ? log(q[k]) : -Inf for k in 1:stats.n_families]
+    PermutationBias(stats.P, log_p, α)
+end
 

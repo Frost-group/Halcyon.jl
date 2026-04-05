@@ -381,7 +381,7 @@ function get_interaction_action(cfg::WormConfiguration{D}, sys::System{D}, i::In
         # FAST PATH: k,j and k,j+1 are both internal beads (stored in cfg.r)
         ri_j = SVector{D,Float64}(ntuple(d -> cfg.r[i, j+1, d], D))
         ri_n = SVector{D,Float64}(ntuple(d -> cfg.r[i, j+2, d], D))
-        
+
         @inbounds for k in 1:N
             k == i && continue
 
@@ -400,7 +400,7 @@ function get_interaction_action(cfg::WormConfiguration{D}, sys::System{D}, i::In
         # SLOW PATH: At least one bead is an endpoint (derived)
         ri_j = get_bead_svec(cfg, i, j, L)
         ri_n = get_bead_svec(cfg, i, j + 1, L)
-        
+
         @inbounds for k in 1:N
             k == i && continue
 
@@ -545,6 +545,7 @@ end
     j_max_open::Int = 10
     j_max_swap::Int = 10
     r_max::Float64 = 0.5
+    bias::Union{Nothing,PermutationBias} = nothing  # permutation sector importance sampling
 end
 
 """
@@ -964,6 +965,40 @@ function swap!(cfg::WormConfiguration{D}, sys::System{D}, params::WormParams) wh
 
     A_SW = (Σ_P / Σ_0) * exp(S_int_old - S_int_new)
 
+    # ── Permutation family importance sampling bias ──
+    if params.bias !== nothing
+        bias = params.bias # struct with P table, log_p weights
+        N = sys.N
+
+        # C-vector of current (pre-swap) topology
+        C_old = permutation_family_C(cfg)
+        rank_old = C_to_rank(C_old, bias.P, N)
+
+        # Temporarily apply proposed topology to read C_new
+        next_save = (cfg.next[i_H], cfg.next[i_star])
+        prev_save = (cfg.prev[i_0], cfg.prev[i_T])
+
+        cfg.next[i_H] = i_0
+        cfg.prev[i_0] = i_H
+        cfg.next[i_star] = i_T
+        cfg.prev[i_T] = i_star
+
+        C_new = permutation_family_C(cfg)
+        rank_new = C_to_rank(C_new, bias.P, N)
+
+        # Revert topology (we are not yet committed) 
+        cfg.next[i_H] = next_save[1]
+        cfg.next[i_star] = next_save[2]
+        cfg.prev[i_0] = prev_save[1]
+        cfg.prev[i_T] = prev_save[2]
+
+        # Bias ratio: p_old^α / p_new^α
+        Δlog_p = bias.α * (bias.log_p[rank_old] - bias.log_p[rank_new])
+        A_SW *= exp(Δlog_p)
+        # "probability factor of one to one ... 
+        #   we have normality, I repeat we have normality."
+    end
+
     if rand() < min(1.0, A_SW)
         # Update permutations
         cfg.next[i_H] = i_0
@@ -972,15 +1007,7 @@ function swap!(cfg::WormConfiguration{D}, sys::System{D}, params::WormParams) wh
         cfg.prev[i_T] = i_star
         cfg.i_head = i_star
 
-        # Update windings:
-        # i_H used to connect to head (broken). Now it connects to i_0.
-        # r_{M, i_H} = r_c_H + w_{i_H} * L
-        # New target i_0 is AT r_c_H. So r_{0, i_0} = r_c_H.
-        # So w_{i_H} remains the same to keep r_{M, i_H} fixed.
-        # Likewise for i_star (new head) relating to its target (broken).
-        # We don't need to change cfg.w values because of our relocation strategy.
-
-        recenter!(cfg, i_0, L)
+        recenter!(cfg, i_0, L) # Spada says just don't think about it & then recenter
         update_head_compact!(cfg, L)
         return true
     else
@@ -1025,8 +1052,8 @@ function energy_components(cfg::WormConfiguration{D}, sys::System{D}) where {D}
     for i in 1:N
         # 2. Endpoint term G1: (r_{M-1} - r_M) · (r_M - r_0)
         rm1 = SVector{D,Float64}(ntuple(d -> r[i, M, d], D))
-        rm  = get_endpoint_svec(cfg, i, L)
-        r0  = SVector{D,Float64}(ntuple(d -> r[i, 1, d], D))
+        rm = get_endpoint_svec(cfg, i, L)
+        r0 = SVector{D,Float64}(ntuple(d -> r[i, 1, d], D))
         G1 += dot(rm1 - rm, rm - r0)
 
         for j in 1:M
@@ -1049,10 +1076,10 @@ function energy_components(cfg::WormConfiguration{D}, sys::System{D}) where {D}
         for j in 1:M, i in 1:N-1, k in i+1:N
             ri_j = SVector{D,Float64}(ntuple(d -> r[i, j, d], D))
             rk_j = SVector{D,Float64}(ntuple(d -> r[k, j, d], D))
-            
+
             rij = wrap_pbc(ri_j - rk_j, L)
             Δc = wrap_pbc(centroids[i] - centroids[k], L)
-            
+
             V_pair += sys.U(rij)
             G2_pair += centroid_virial_term(sys.U, rij, Δc)
         end
@@ -1065,7 +1092,7 @@ function energy_components(cfg::WormConfiguration{D}, sys::System{D}) where {D}
     #   Thermo: E = DN/(2δτ) − K_spring/(4λδτ²M) + ⟨V⟩
     #   Virial: E = DN/(2β)  + G1/(4λδτ²M) + G2/(2M) + ⟨V⟩
     E_thermo = (D * N / (2δτ)) - (K_spring / (4λ * δτ^2 * M)) + (V_total / M)
-    E_virial = (D * N / (2β))  + (G1 / (4λ * δτ^2 * M)) + (G2 / (2.0 * M)) + (V_total / M)
+    E_virial = (D * N / (2β)) + (G1 / (4λ * δτ^2 * M)) + (G2 / (2.0 * M)) + (V_total / M)
 
     return (; E_thermo, E_virial, K_spring, V_ext, V_pair, G1, G2_ext, G2_pair)
 end
