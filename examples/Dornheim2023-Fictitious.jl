@@ -15,21 +15,21 @@ using ProgressMeter
 const N_PARTICLES = 6
 const D = 2
 const β_DEFAULT = 1.0
-const M_DEFAULT = 20
+const M_DEFAULT = 100
 const λ = 0.5               # ℏ²/(2m) = 0.5 in oscillator units
-const k_trap = 0.5          # V(r) = 1/2 k r²
+const k_trap = 1.0          # V(r) = 1/2 k r² ; we now have a DIFFERENT DEFINITION
 const L = 5.0              # Box size (large for trapped system)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Monte Carlo Parameters
 # ═══════════════════════════════════════════════════════════════════════════════
 
-const EQUILIBRATION_STEPS = 1_000_000
-const MEASUREMENT_STEPS = 5_000_000
-const MEASURE_INTERVAL = 100
+const EQUILIBRATION_STEPS = 15_000_000
+const MEASUREMENT_STEPS = 25_000_000
+const MEASURE_INTERVAL = 5
 
 const C = 0.7
-const j_max = 50 # For redrawing: uses Levy flight (diffusion), so in harmonic trap keep these small?
+const j_max = 20 # For redrawing: uses Levy flight (diffusion), so in harmonic trap keep these small?
 const r_max = 8.0 # max move...
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -135,7 +135,7 @@ function run_simulation(; N::Int=N_PARTICLES, β::Float64=β_DEFAULT, M::Int=M_D
         M, N;
         D=D, β=β, λ=λ,
         V=HarmonicPotential(k=k_trap),
-        U=CoulombPotential(g=-λ_coulomb),
+        U=CoulombPotential(g=λ_coulomb),
         L=L,
         statistics=Bosons  # Sample in Bosonic ensemble for reweighting
     )
