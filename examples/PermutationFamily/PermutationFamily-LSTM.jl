@@ -271,7 +271,12 @@ function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutatio
         se_E_l[l] = sqrt(max(var_l, 0.0))
     end
 
-    @printf("fit_LinearEnergyModel: E_MF= %8.4f\n", E_MF)
+    # Effective Number of Parameters (gamma / d_eff)
+    # Tr((X'WX + P)⁻¹ X'WX)
+    M_data = X_gf' * W_diag * X_gf
+    γ = tr(H \ M_data)
+
+    @printf("fit_LinearEnergyModel(λ_ridge_Δ=%g, λ_smooth=%g): \n EffectiveDoF=γ= %g E_MF=E_1= %8.4f\n", λ_ridge_Δ, λ_smooth, γ, E_MF)
 
     @printf("  E_l \t RawValue \t\t E_correlation \t Std Error\n")
     for l in 1:min(8, N)
@@ -616,9 +621,10 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     bias_α = 0.5  # gentle softening; α=1.0 for full flat-histogram; sort of Wang-Landau
     # experiments showed α=1.0 was terrible - threw MC into the OPPOSITE undersampling, i.e.
     # forced condensation if not present
-    bias = make_permutation_bias(model_lstm_MAP, MC_data; α=bias_α)
+    biasmodel = model_map
+    bias = make_permutation_bias(biasmodel, MC_data; α=bias_α)
 
-    println("\n#### Biased MC (α=$bias_α, model=LSTM-MAP) ####")
+    println("\n#### Biased MC (α=$bias_α, model=$biasmodel) ####")
     params_biased = default_worm_params(sys)
     params_biased.bias = bias
 
@@ -703,8 +709,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 33
-    magicsteps = 1_000_000
+    Nmagic = 33 
+    magicsteps = 50_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
