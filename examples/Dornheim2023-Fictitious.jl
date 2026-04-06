@@ -131,11 +131,15 @@ end
 
 function run_simulation(; N::Int=N_PARTICLES, β::Float64=β_DEFAULT, M::Int=M_DEFAULT,
     λ_coulomb::Float64=0.5, verbose::Bool=true)
+
+    # Kelbg smoothing length: λ² = ħ²τ / m = 2 * (ħ²/2m) * (β/M)
+    λ_kelbg = sqrt(2 * λ * β / M)
+
     sys = System(
         M, N;
         D=D, β=β, λ=λ,
         V=HarmonicPotential(k=k_trap),
-        U=CoulombPotential(g=λ_coulomb),
+        U=KelbgCoulombPotential(g=λ_coulomb, λ=λ_kelbg),
         L=L,
         statistics=Bosons  # Sample in Bosonic ensemble for reweighting
     )

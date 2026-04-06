@@ -10,7 +10,8 @@ set title "Total Energy E vs ξ (N=6, β=1)" font ",12"
 set xlabel "ξ"
 set ylabel "E"
 set xrange [-1.1:1.1]
-set yrange [15:40] # crazy values can throw this out
+set ytics 2
+set yrange [8:28] # Dornheim is 8:28. crazy values can throw this out
 set grid
 set key top right
 set arrow from 0, graph 0 to 0, graph 1 nohead lc rgb "black" lw 1.5

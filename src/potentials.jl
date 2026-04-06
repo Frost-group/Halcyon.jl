@@ -26,6 +26,10 @@ abstract type PairPotential <: AbstractPotential end
 
 Return the gradient ∇V(r) of the potential.
 Fallback uses ForwardDiff for automatic differentiation.
+
+Almost certainly unacceptably slow. 
+
+Also no careful treatment of limits, so Virial estimator likely to explode with the gradients. 
 """
 function potential_derivative(V::AbstractPotential, r::AbstractVector{<:Real})
     @warn "ForwardDiff fallback for $(typeof(V)). Expect SEVERE SLOW DOWN."
@@ -226,6 +230,106 @@ function potential_derivative(U::LennardJonesPotential, r::AbstractVector{<:Real
     return (-24U.ϵ / r_norm^2) * (2sr12 - sr6) * r
 end
 
+# -----------------------------------------------------------------------------
+# 1/r nastiness - Kelbg corrections
+# -----------------------------------------------------------------------------
+"""
+Approximates the core polynomial P(t) for the complementary error function.
+Used to factor out the exp(-x^2) term for computational efficiency.
+"""
+@inline function hastings_poly(x::Float64)::Float64
+    p = 0.3275911
+    a1 = 0.254829592
+    a2 = -0.284496736
+    a3 = 1.421413741
+    a4 = -1.453152027
+    a5 = 1.061405429
+
+    t = 1.0 / (1.0 + p * x)
+
+    # Horner's method for polynomials
+    return t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))))
+end
+
+const π_sqrt = sqrt(π)
+
+# -----------------------------------------------------------------------------
+# Kelbg-Smoothed Coulomb Potential (Quantum Dot)
+# -----------------------------------------------------------------------------
+
+Base.@kwdef struct KelbgCoulombPotential <: PairPotential
+    g::Float64       # Coupling strength (+ is repulsive)
+    λ::Float64       # Segment thermal wavelength : ħ²τ / (2μ)
+
+    # Pre-calculated for performance
+    inv_λ::Float64 = 1.0 / λ
+    inv_λ2::Float64 = 1.0 / (λ^2)
+end
+
+Base.show(io::IO, obj::KelbgCoulombPotential) = print(io, "KelbgCoulombPotential(g=$(obj.g), λ=$(obj.λ))")
+
+# --- Action Evaluator ---
+(U::KelbgCoulombPotential)(r_norm::Float64) = begin
+    r_norm < 1e-10 && return U.g * π_sqrt * U.inv_λ
+
+    x = r_norm * U.inv_λ
+
+    # Avoid transcendental math for long range where correction is negligible (< 1e-15)
+    x > 6.0 && return U.g / r_norm
+
+    exp_mx2 = exp(-x^2)
+    poly_erfc = hastings_poly(x)
+
+    return (U.g / r_norm) * (1.0 - exp_mx2 * (1.0 - x * π_sqrt * poly_erfc))
+end
+
+(U::KelbgCoulombPotential)(r::AbstractVector{<:Real}) = U(norm(r))
+
+# --- Virial Forces and Estimators ---
+function potential_derivative(U::KelbgCoulombPotential, r::AbstractVector)
+    r_norm = norm(r)
+    r_norm < 1e-10 && return zeros(length(r))
+
+    # ∇U = (g / r³) * expm1(-r² / λ²) * r
+    x2 = r_norm^2 * U.inv_λ2
+    prefactor = (U.g / r_norm^3) * (x2 > 36.0 ? -1.0 : expm1(-x2))
+    return prefactor * r
+end
+
+function potential_derivative!(out::AbstractVector, U::KelbgCoulombPotential, r::AbstractVector{<:Real})
+    r_norm = norm(r)
+    if r_norm < 1e-10
+        fill!(out, 0.0)
+    else
+        x2 = r_norm^2 * U.inv_λ2
+        prefactor = (U.g / r_norm^3) * (x2 > 36.0 ? -1.0 : expm1(-x2))
+        out .= prefactor .* r
+    end
+    return out
+end
+
+function virial_contribution(U::KelbgCoulombPotential, r::AbstractVector)
+    r_norm = norm(r)
+    r_norm < 1e-10 && return 0.0
+
+    # r · ∇U = (g / r) * expm1(-r² / λ²)
+    x2 = r_norm^2 * U.inv_λ2
+    return (U.g / r_norm) * (x2 > 36.0 ? -1.0 : expm1(-x2))
+end
+
+function centroid_virial_term(U::KelbgCoulombPotential, rij::AbstractVector, Δcentroid::AbstractVector)
+    r_norm = norm(rij)
+    r_norm < 1e-10 && return 0.0
+
+    s = 0.0
+    @inbounds for d in eachindex(rij, Δcentroid)
+        s += (rij[d] - Δcentroid[d]) * rij[d]
+    end
+
+    x2 = r_norm^2 * U.inv_λ2
+    prefactor = (U.g / r_norm^3) * (x2 > 36.0 ? -1.0 : expm1(-x2))
+    return prefactor * s
+end
 
 # -----------------------------------------------------------------------------
 # Coulomb Potential
@@ -285,7 +389,7 @@ function yakub_ronchi_phi(r::Float64, L::Float64; g::Float64=1.0)::Float64
     r <= 0.0 && return Inf
     r_cut = yakub_ronchi_r_cut(L)
     r >= r_cut && return 0.0
-    t = r / r_cut
+    # t = r / r_cut
     # phi = (g/r) * (1 + 0.5*t*(t^2 - 3))
     #     = g/r + g/r * 0.5 * (r^3/r_cut^3 - 3r/r_cut)
     #     = g/r + 0.5*g * (r^2/r_cut^3 - 3/r_cut)
@@ -376,6 +480,122 @@ function centroid_virial_term(U::YakubRonchiPotential, rij::AbstractVector, Δce
         s += (rij[d] - Δcentroid[d]) * rij[d]
     end
     return (dv_dr / r_norm) * s
+end
+
+# -----------------------------------------------------------------------------
+# Yakub-Ronchi Potential with Kelbg Short-Range Smoothing (UEG)
+# -----------------------------------------------------------------------------
+"""
+A PairPotential for Uniform Electron Gas (UEG) simulations.
+Applies the Yakub-Ronchi isotropic spatial cutoff for long-range interactions,
+and the exact diagonal Kelbg two-body action for short-range quantum smoothing.
+"""
+Base.@kwdef struct YakubRonchiKelbgPotential <: PairPotential
+    g::Float64             # Coupling strength
+    λ::Float64       # Segment thermal de Broglie wavelength: ħ²τ / (2μ)
+    L::Float64             # Simulation box length
+
+    # Pre-calculated to save CPU cycles in the inner loop
+    r_cut::Float64 = yakub_ronchi_r_cut(L)
+    inv_λ::Float64 = 1.0 / λ
+    inv_λ2::Float64 = 1.0 / (λ^2)
+end
+
+Base.show(io::IO, obj::YakubRonchiKelbgPotential) = print(io, "YakubRonchiKelbgPotential(g=$(obj.g), λ=$(obj.λ), L=$(obj.L))")
+
+(U::YakubRonchiKelbgPotential)(r::Float64) = begin
+    # Beyond the cutoff, particles do not interact
+    r >= U.r_cut && return 0.0
+
+    # The macroscopic background polynomial (Yakub-Ronchi)
+    yr_bg = 0.5 * U.g * ((r^2 / U.r_cut^3) - (3.0 / U.r_cut))
+
+    # Safely bounded finite potential at the origin
+    if r < 1e-10
+        return U.g * π_sqrt * U.inv_λ + yr_bg
+    end
+
+    x = r * U.inv_λ
+
+    # TODO: Check this is actually OK and doesn't include artefacts!
+    if x > 6.0 # if long range, return bare YakubRonchi to avoid polynomial + exponential
+        return (U.g / r) + yr_bg
+    end
+
+    # Compute the exponential once for both the Kelbg term and Hastings poly
+    exp_mx2 = exp(-x^2)
+    poly_erfc = hastings_poly(x)
+
+    # Factored Kelbg short-range action + YR long-range background
+    kelbg_term = (U.g / r) * (1.0 - exp_mx2 * (1.0 - x * π_sqrt * poly_erfc))
+
+    return kelbg_term + yr_bg
+end
+
+(U::YakubRonchiKelbgPotential)(r::AbstractVector{<:Real}) = U(norm(r))
+
+function potential_derivative(U::YakubRonchiKelbgPotential, r::AbstractVector)
+    r_norm = norm(r)
+
+    r_norm >= U.r_cut && return zeros(length(r))
+    r_norm < 1e-10 && return zeros(length(r))
+
+    x2 = r_norm^2 * U.inv_λ2
+    # ∇U = [ (g/r³) * expm1(-r²/λ²) + (g/r_cut³) ] * r
+
+    # The first term is the exact Kelbg force; the second is the continuous YR background force.
+    scalar_force_over_r = (U.g / r_norm^3) * (x2 > 36.0 ? -1.0 : expm1(-x2)) + (U.g / U.r_cut^3)
+
+    return scalar_force_over_r * r
+end
+
+"""
+Follows above, but optimised to avoid allocations.
+"""
+function potential_derivative!(out::AbstractVector, U::YakubRonchiKelbgPotential, r::AbstractVector{<:Real})
+    r_norm = norm(r)
+
+    if r_norm >= U.r_cut || r_norm < 1e-10
+        fill!(out, 0.0)
+    else
+        # ∇U = [ (g/r³) * expm1(-r²/λ²) + (g/r_cut³) ] * r
+        x2 = r_norm^2 * U.inv_λ2
+        scalar_force_over_r = (U.g / r_norm^3) * (x2 > 36.0 ? -1.0 : expm1(-x2)) + (U.g / U.r_cut^3)
+        out .= scalar_force_over_r .* r
+    end
+    return out
+end
+
+function virial_contribution(U::YakubRonchiKelbgPotential, r::AbstractVector)
+    r_norm = norm(r)
+
+    r_norm >= U.r_cut && return 0.0
+    r_norm < 1e-10 && return 0.0
+
+    # r · ∇U
+    x2 = r_norm^2 * U.inv_λ2
+    kelbg_virial = (U.g / r_norm) * (x2 > 36.0 ? -1.0 : expm1(-x2))
+    yr_virial = (U.g * r_norm^2) / (U.r_cut^3)
+
+    return kelbg_virial + yr_virial
+end
+
+function centroid_virial_term(U::YakubRonchiKelbgPotential, rij::AbstractVector, Δcentroid::AbstractVector)
+    r_norm = norm(rij)
+
+    r_norm >= U.r_cut && return 0.0
+    r_norm < 1e-10 && return 0.0
+
+    s = 0.0
+    @inbounds for d in eachindex(rij, Δcentroid)
+        s += (rij[d] - Δcentroid[d]) * rij[d]
+    end
+    # Multiply the positional dot-product `s` by the scalar magnitude of the force over distance
+
+    x2 = r_norm^2 * U.inv_λ2
+    scalar_force_over_r = (U.g / r_norm^3) * (x2 > 36.0 ? -1.0 : expm1(-x2)) + (U.g / U.r_cut^3)
+
+    return scalar_force_over_r * s
 end
 
 # -----------------------------------------------------------------------------
