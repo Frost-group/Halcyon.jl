@@ -180,7 +180,7 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
     return LSTMEnergyResidualModel(linear_model, prob_model, head, cached_energies)
 end
 
-function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutationFamilyStats; λ_ridge=1e-6)
+function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutationFamilyStats; λ_ridge_Δ=1e-6, λ_smooth=1e4)
     N = stats.N
     n_visited = count(c -> c > 0, stats.count)
 
@@ -216,7 +216,6 @@ function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutatio
     # Smoothness Prior on Δ_l (which cleanly translates to smoothing E_l)
     # Penalize second derivative of Δ_l to ensure linearity for unvisited cycles: 
     # extrapolate off into rarely visited cycle-space
-    λ_smooth = 1e4 # prefactor for the design matrix
     D_mat = zeros(Float64, N - 2, N) # linear algebra is pretty mind blowing
     if N >= 3
         # First row penalizes second deriv around l=2: Δ_3 - 2Δ_2 + Δ_1, but Δ_1 = 0
@@ -231,8 +230,13 @@ function fit_LinearEnergyModel(::Type{LinearEnergyModel}, stats::DensePermutatio
 
     # Solve the Normal Equations
     W_diag = Diagonal(W)
+    P_ridge = Diagonal([0.0; fill(λ_ridge_Δ, N - 1)])
+    # Do not penalize E_MF; therefore if you take λ_ridge_Δ -> ∞, 
+    #  you recover the Ideal-gas limit of DuBois (just E_l=l*E_MF)
+    # Take λ_smooth -> ∞ to enforce strict linearity (no curvature), 
+    #  so recovers the exchange-penalty model of Feynman as described by DuBois
     H = X_gf' * W_diag * X_gf +
-        λ_ridge * I +
+        P_ridge +
         λ_smooth * (D_mat' * D_mat)
     rhs = X_gf' * W_diag * y
     coeffs = H \ rhs # big bada boom
@@ -479,14 +483,23 @@ end
 
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
     equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=1,
-    lstm_epochs::Int=200, lstm_hidden::Int=64, lstm_embed::Int=16,
-    lstm_lr::Float64=1e-3)
+    lstm_epochs::Int=500, lstm_hidden::Int=64, lstm_embed::Int=16,
+    lstm_lr::Float64=3e-3, use_kelbg::Bool=true)
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
-    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=YakubRonchiPotential(L=L, g=1))
+
+    # Kelbg smoothing parameter: λ² = ħ²τ / (2μ). For identical particles μ = m/2,
+    # so λ² = ħ²τ / m = 2 * (ħ²/2m) * τ = 2 * λ_sys * (β/M)
+    λ_kelbg = sqrt(2 * λħ * (β / M))
+
+    pair_pot = use_kelbg ? YakubRonchiKelbgPotential(L=L, g=1.0, λ=λ_kelbg) : YakubRonchiPotential(L=L, g=1.0)
+    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=pair_pot)
     params = default_worm_params(sys)
 
     @printf("|>|>|>|>|>0> WORM: N= %d θ= %g r_s= %g (L= %g β= %g λ= %g) \n", N, θ, r_s, L, β, λħ)
+    if use_kelbg
+        @printf("  Using Kelbg-smoothed potential with λ= %g, λ² = %g\n", λ_kelbg, λ_kelbg^2)
+    end
 
     # Add Jellium Background; Yakub-Ronchi
     E_bg = yakub_ronchi_background_constant(L, N)
@@ -509,7 +522,10 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         E_MC + N * E_bg, sigma, (E_MC + N * E_bg) / N, 2 * (E_MC + N * E_bg) / N)
 
     # OK, now we start doing the weird stuff! What Would Ceperley Do? (WWCD?)
-    linearEmodel = fit_LinearEnergyModel(LinearEnergyModel, MC_data)
+    # Set smoothness to massive to enforce the Feynman/DuBois exchange penalty model
+    # I think this is what they used for low T ?
+    smoothness = (θ <= 0.5) ? 1e12 : 1e4
+    linearEmodel = fit_LinearEnergyModel(LinearEnergyModel, MC_data; λ_smooth=smoothness)
     @show linearEmodel
     E_lin = calculate_reweighted_energy(fit(MultiplicityModel, MC_data), linearEmodel, MC_data) + (N * E_bg)
     @printf("E_Linear= %.8f σ=  %.8f E_Linear/N= %.8f Ha = %.8f Ry (including Yakub-Ronchi Jellium background)\n",
@@ -533,6 +549,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     lstm_kw = (; n_embed=lstm_embed, n_hidden=lstm_hidden, epochs=lstm_epochs, lr=lstm_lr)
 
     # 1. Multiplicity prior — gets M(λ) factors for free (θ=0)
+    #   - essentially this just tells us that LSTM alone is terrible, KL divergence stays massive
     println("Training LSTM (multiplicity prior)...")
     model_lstm_mult = fit(LSTMPermutationModel, MC_data; prior=model_mult, lstm_kw...)
     # 2. DuBois prior — gets M(λ) + κ-penalty for free
@@ -626,7 +643,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
 
     # ── Refit energy models on biased data (for better rare-sector coverage?) ──
     println("\n  Refitting Linear Energy Model on biased data...")
-    linearEmodel_biased = fit_LinearEnergyModel(LinearEnergyModel, MC_biased)
+    linearEmodel_biased = fit_LinearEnergyModel(LinearEnergyModel, MC_biased; λ_smooth=smoothness)
 
     println("  Refitting LSTM Energy Heads on biased data...")
     lstm_energy_shallow_biased = fit_LSTMEnergyResidualModel(
@@ -686,8 +703,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 7
-    magicsteps = 1_000_000_000
+    Nmagic = 33
+    magicsteps = 1_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
