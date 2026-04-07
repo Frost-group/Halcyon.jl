@@ -1,0 +1,38 @@
+reset
+set terminal qt size 1000,600 title "Fermion Energy Distributions" font "Helvetica,12"
+
+set title "Reservour: PIMC energy samples by permutation family" font "Helvetica,14"
+set xlabel "Energy (Hartree)"
+set ylabel "Density"
+
+# Clean up the borders
+set border 3
+set tics nomirror
+set grid ytics lc rgb "#e0e0e0"
+
+# Move legend out of the way
+set key outside right top
+
+set xrange [-100:100]
+set yrange [-0.1:0.20]
+
+# The Magic: Inline awk script to transpose rows -> columns
+file = "< awk '{for(i=1;i<=NF;i++) a[i,NR]=$i} END {for(i=1;i<=NF;i++) {for(j=1;j<=NR;j++) printf a[i,j] \" \"; print \"\"}}' reservoir.dat"
+
+# raw data as "rug plot" below y=0 (using rand(0) to jitter them vertically)
+# The smooth kdensity estimator for the actual distributions
+#
+# `for [i=1:*]` loops until it runs out of columns
+
+set samples 2000 # moar points in the kdensity thingy ==> less jagged 
+
+plot \
+    for [i=1:*] file using i:(-0.1+0.1*rand(0)) \
+        with points pt 7 ps 0.3 lc i notitle, \
+    for [i=1:*] file using i:(1/1000.0) \
+        smooth kdensity bandwidth 5 with lines lw 2 lc i title sprintf("Cycle %d", i)
+
+# set terminal pngcairo size 1000,600 font "Helvetica,12"
+# set output "reservoir.png"
+
+

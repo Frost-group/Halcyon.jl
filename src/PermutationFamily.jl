@@ -219,14 +219,23 @@ struct DensePermutationFamilyStats
     count::Vector{Int64}
     estimator::Vector{Float64}
     estimator2::Vector{Float64}
+    reservoir::Vector{Vector{Float64}}
 end
 # FIXME: now immutable struct, but still have count & estimator as mutable vectors?
 #  Not sure if this is still a problem? Or whether once instantiated, Julia kmows everything there is to know 
 
-function DensePermutationFamilyStats(N::Int)
+function DensePermutationFamilyStats(N::Int; reservoir=true)
     P = integer_partition_count_table(N)
     pn = P[N+1, N+1]
-    DensePermutationFamilyStats(N, P, pn, zeros(Int64, pn), zeros(Float64, pn), zeros(Float64, pn))
+    res= reservoir ? [zeros(Float64, 5000) for _ in 1:pn] : zeros(Float64,0)
+
+    DensePermutationFamilyStats(N, 
+                                P, 
+                                pn, 
+                                zeros(Int64, pn), 
+                                zeros(Float64, pn), 
+                                zeros(Float64, pn), 
+                                res )
 end
 
 """
@@ -235,12 +244,38 @@ end
 Record an observation in sector defined by cycle-count vector `C`, accumulating
 the observable value `E`.  Dividing `estimator[k]` by `count[k]` gives the mean.
 """
-function observe_permutation_family!(acc::DensePermutationFamilyStats, C::Vector{Int}, E::Float64)
-    k = C_to_rank(C, acc.P, acc.N)
-    acc.count[k] += 1
-    acc.estimator[k] += E
-    acc.estimator2[k] += E^2
+function observe_permutation_family!(stats::DensePermutationFamilyStats, C::Vector{Int}, E::Float64)
+    k = C_to_rank(C, stats.P, stats.N)
+    stats.count[k] += 1
+    stats.estimator[k] += E
+    stats.estimator2[k] += E^2
 end
+
+function observe_permutation_family_reservoir!(stats::DensePermutationFamilyStats, C::Vector{Int}, E::Float64)
+    k = C_to_rank(C, stats.P, stats.N)
+    stats.count[k] += 1
+    stats.estimator[k] += E
+    stats.estimator2[k] += E^2
+
+# Yeah we should take a trip to the reservoir
+# I heard you cast off and she sailed real fine
+# https://www.youtube.com/watch?v=Ien2w-MfNTg
+
+    c = stats.count[k]
+    res_size = length(stats.reservoir[k])
+    
+    if c <= res_size
+        # Fill 'er up
+        stats.reservoir[k][c] = E
+    else
+        # Replace exponentially rarely
+        j = rand(1:c)
+        if j <= res_size
+            stats.reservoir[k][j] = E
+        end
+    end
+end
+
 
 # ===================================================================
 # Accessor functions on DensePermutationFamilyStats

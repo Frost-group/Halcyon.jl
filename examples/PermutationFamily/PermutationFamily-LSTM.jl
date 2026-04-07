@@ -393,8 +393,22 @@ end
 
 function merge_stats(a::DensePermutationFamilyStats, b::DensePermutationFamilyStats)
     a.N == b.N && a.n_families == b.n_families || throw(ArgumentError("merge_stats"))
-    DensePermutationFamilyStats(a.N, a.P, a.n_families,
-        a.count .+ b.count, a.estimator .+ b.estimator, a.estimator2 .+ b.estimator2)
+
+    # initially I dot-added the elements of the reservoir like an idiot
+    # Helper function: returns a memory-efficient view of only the filled samples
+    valid(x, k) = view(x.reservoir[k], 1:min(x.count[k], length(x.reservoir[k])))
+    # Map over all families to create the new merged reservoirs
+    merged_res = map(1:a.n_families) do k
+        pool = shuffle!(vcat(valid(a, k), valid(b, k)))
+        keep = min(length(pool), length(a.reservoir[k]))
+
+        out = zeros(Float64, length(a.reservoir[k]))
+        out[1:keep] .= view(pool, 1:keep)
+        out # Implicit return for the map
+    end
+
+    return DensePermutationFamilyStats(a.N, a.P, a.n_families,
+        a.count .+ b.count, a.estimator .+ b.estimator, a.estimator2 .+ b.estimator2, merged_res)
 end
 
 # ===================================================================
@@ -466,7 +480,7 @@ function permutation_family_mc_chain(sys, params; equil, steps, measure_every, s
         if t % measure_every == 0 && cfg.sector == Z_SECTOR
             C_vec = permutation_family_C(cfg)
             E_therm, E_virial = energy_estimators(cfg, sys)
-            observe_permutation_family!(acc, C_vec, E_virial)
+            observe_permutation_family_reservoir!(acc, C_vec, E_virial)
         end
     end
     acc
@@ -515,6 +529,21 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
 
     n_z = sum(MC_data.count)
     @printf("\n MC Complete! N= %d  r_s= %g θ= %g  n_families= %d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, n_z)
+
+    # save reservoir of samples
+    open("reservoir.dat", "w") do io
+        println(io, "# Estimator reservoir")
+        for k in 1:MC_data.n_families
+            for E in MC_data.reservoir[k]
+                if E == 0.0
+                    break
+                end # if as initialised, no more data; throughs off plots
+                @printf(io, "%g ", E)
+            end
+            @printf(io, "\n")
+        end
+    end
+    println("Reservoir written; Well you should let me know when you're home and dry")
 
     # Calculate permutation histogram from MC data
     MC_permutation_histogram = permutation_histogram_from_stats(MC_data)
@@ -697,7 +726,6 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     end
     println("Wrote PermutationFamily_LSTM_comparison.dat")
 
-
     return MC_data, MC_biased, bias, models
 end
 
@@ -709,8 +737,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 33 
-    magicsteps = 50_000_000
+    Nmagic = 7
+    magicsteps = 10_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
@@ -728,5 +756,5 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # MC_and_fit_model(; N=4, r_s=0.5, θ=1.0, steps=100_000_000,)
     # N=4,28 ('standard reference')
     # N=40,66 in other figures
-
 end
+

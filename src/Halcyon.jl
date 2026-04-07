@@ -52,7 +52,7 @@ export ideal_fermion_permutation_P_l
 # Permutation families (conjugacy classes / C-vector representation)
 export integer_partition_count_table, permutation_family_count
 export permutation_family_C, C_to_rank, C_from_rank
-export DensePermutationFamilyStats, observe_permutation_family!
+export DensePermutationFamilyStats, observe_permutation_family!, observe_permutation_family_reservoir!
 # Accessors on DensePermutationFamilyStats
 export log_multiplicities, cycle_count_matrix, empirical_probabilities
 # Permutation sector models
