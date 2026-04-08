@@ -1050,38 +1050,49 @@ function energy_components(cfg::WormConfiguration{D}, sys::System{D}) where {D}
     end
 
     for i in 1:N
-        # 2. Endpoint term G1: (r_{M-1} - r_M) · (r_M - r_0)
+        # 2. Endpoint term G1
         rm1 = SVector{D,Float64}(ntuple(d -> r[i, M, d], D))
-        rm = get_endpoint_svec(cfg, i, L)
+        rm = get_endpoint_svec(cfg, i, L) # Already unwrapped with w[i]!
         r0 = SVector{D,Float64}(ntuple(d -> r[i, 1, d], D))
         G1 += dot(rm1 - rm, rm - r0)
 
         for j in 1:M
-            # 3. Spring term K_spring = Σ |r_j − r_{j+1}|²
             rj = SVector{D,Float64}(ntuple(d -> r[i, j, d], D))
             rj_next = j < M ? SVector{D,Float64}(ntuple(d -> r[i, j+1, d], D)) : rm
-            dx = wrap_pbc(rj - rj_next, L)
+            
+            # FIX: DO NOT wrap_pbc here! If j==M, rm already includes winding.
+            # If j<M, the polymer is contiguous in memory anyway.
+            dx = rj - rj_next 
             K_spring += sum(abs2, dx)
 
-            # 4. External potential: V_ext and centroid virial G2_ext
             if has_ext
                 V_ext += sys.V(rj)
+                # Centroid virial for external uses raw coordinates relative to centroid
+                # Assuming external V is centered at 0 and doesn't have PBC issues
                 G2_ext += centroid_virial_term(sys.V, rj, centroids[i])
             end
         end
     end
 
-    # 5. Pair potential: V_pair and centroid virial G2_pair
+    # 5. Pair potential
     if has_pair
-        for j in 1:M, i in 1:N-1, k in i+1:N
-            ri_j = SVector{D,Float64}(ntuple(d -> r[i, j, d], D))
-            rk_j = SVector{D,Float64}(ntuple(d -> r[k, j, d], D))
-
-            rij = wrap_pbc(ri_j - rk_j, L)
+        for i in 1:N-1, k in i+1:N
+            # FIX: Get the consistent minimum-image vector between the centroids once
             Δc = wrap_pbc(centroids[i] - centroids[k], L)
 
-            V_pair += sys.U(rij)
-            G2_pair += centroid_virial_term(sys.U, rij, Δc)
+            for j in 1:M
+                ri_j = SVector{D,Float64}(ntuple(d -> r[i, j, d], D))
+                rk_j = SVector{D,Float64}(ntuple(d -> r[k, j, d], D))
+
+                # FIX: Build the instantaneous vector from the centroid distance 
+                # plus internal fluctuations. NO independent wrap_pbc!
+                δri = ri_j - centroids[i]
+                δrk = rk_j - centroids[k]
+                rij_consistent = Δc + δri - δrk
+
+                V_pair += sys.U(rij_consistent)
+                G2_pair += centroid_virial_term(sys.U, rij_consistent, Δc)
+            end
         end
     end
 

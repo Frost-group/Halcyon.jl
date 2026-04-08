@@ -94,12 +94,25 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
     E_raw = zeros(Float32, n_obs)
     W_arr = zeros(Float32, n_obs)
 
+    # 3. Global (g_) variance for a Bayes prior on the sample variance
+    # Filter out unvisited sectors (with a boolean mask)
+    g_visited = stats.count .> 0
+    g_c    = stats.count[g_visited]
+    g_est  = stats.estimator[g_visited]
+    g_est2 = stats.estimator2[g_visited]
+    # Total variance across all samples 
+    g_N = sum(g_c)
+    g_mean = sum(g_est) / g_N
+    g_var = max((sum(g_est2) / g_N) - g_mean^2, 1e-12)  # usual 1e-12 to stop underflow
+
     # bit painful this really; not sure if I should fill with dummy values or whatever... once we get N>100, we'll need to be more clever generally
     idx = 1
     for k in 1:stats.n_families
         c_k = stats.count[k]
         if c_k > 0
-            E_mean = stats.estimator[k] / c_k
+            E_mean = stats.estimator[k] / c_k # sample (permutation family) mean
+            E_var  = max.((stats.estimator2[k] ./ c_k) .- E_mean.^2, 0.0) # sample var
+
             E_raw[idx] = Float32(E_mean)
 
             C_k = C_from_rank(k, N, stats.P)
@@ -107,7 +120,19 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
 
             delta_E[1, idx] = Float32(E_mean - E_lin)
 
-            W_arr[idx] = Float32(c_k) # now directly using MC counts... incorporating variance blew out atteniont to trivial regions
+            # variance-smooth to attempt do use sample-variance without the previous
+            # statistical blow-up for rare cycles; always have x of global variance mixed in
+            # Empirical Bayes Variance Shrinkage
+            # Act as if every sector has seen γ additional "global average" observation
+            #  γ = 1, Laplace smoothing: 'uninformative' prior
+            #  γ = 2, Inverse-Gamma prior ?
+            γ = 3.0
+
+            var_smooth = (c_k .* E_var .+ γ * g_var) ./ (c_k .+ γ)
+            W_arr[idx] = Float32(c_k) / var_smooth
+            # Was directly using MC counts... incorporating variance blew out atteniont to trivial regions
+            @printf("LSTM Var smooth: Cycle= %d c_k= %d g_var= %g E_var= %g var_smooth= %g W_arr[%d]= %g\n",
+                    k,c_k,g_var,E_var,var_smooth,idx,W_arr[idx])
             idx += 1
         end
     end
@@ -131,7 +156,7 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
     # Weighted Least Squares Loss over the empirical delta batch
     wls_loss(m, x, y, w) = sum(w' .* (m(x) .- y) .^ 2)
 
-    println("  Training Energy Head: ", head)
+    println("  Training LSTM Energy Head: ", head)
     for epoch in 1:epochs
         grad = Flux.gradient(head) do m
             wls_loss(m, h_final, delta_E, W_arr)
@@ -737,8 +762,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 7
-    magicsteps = 10_000_000
+    Nmagic = 7 
+    magicsteps = 1_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)

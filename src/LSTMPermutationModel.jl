@@ -22,6 +22,7 @@
 
 using Flux
 using Flux: logsoftmax
+using Printf
 
 ### Keep it old skool : LSTM ###
 
@@ -317,7 +318,7 @@ function fit(::Type{LSTMPermutationModel}, stats::DensePermutationFamilyStats;
         if epoch % 20 == 0 || epoch == 1
             Flux.reset!(chain)
             l = _masked_nll(chain, Xs, Ys_oh, prior_bias, weights)
-            println("  LSTM epoch $epoch/$epochs  NLL = $(round(Float64(l), digits=4))")
+            @printf(" %d/%d NLL= %8.4f ",epoch,epochs,Float64(l)) # more compact w/o line breaks
         end
     end
 
