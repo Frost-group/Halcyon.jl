@@ -151,21 +151,39 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
     push!(layers, Dense(in_dim => 1))
 
     head = Chain(layers...)
-    opt_state = Flux.setup(Adam(lr), head)
+    #opt_state = Flux.setup(Adam(lr), head)
+    # 'Weight decay' is just L2 norm on weights (paramters of fit) penalising large vlaues
+    # called weight-decy 'cause you add it as a constant to the gradient, so is noiseless
+    # c.f. adding directly to the loss and back prop
+    opt_state = Flux.setup(OptimiserChain(WeightDecay(1e-3), Adam(lr)), head)
 
     # Weighted Least Squares Loss over the empirical delta batch
     wls_loss(m, x, y, w) = sum(w' .* (m(x) .- y) .^ 2)
 
+    # Trying to control affect of outliers. 
+    # Huber Loss (L2 for small values, L1 for large)
+    # delta (δ) controls where the loss transitions from quadratic to linear.
+    # δ = 1.0f0 means mismatch < 1 Hartree are fit with MSE, mismatch > 1 Hartree are fit linearly.
+    function huber_loss(m, x, y, w; δ=1.0)
+        res = m(x) .- y
+        abs_res = abs.(res)
+        # 0.5 * x^2 if |x| <= δ, else δ * |x| - 0.5 * δ^2
+        losses = ifelse.(abs_res .<= δ, 0.5 .* abs_res.^2, δ .* (abs_res .- 0.5 .* δ^2))
+        return sum(w' .* losses)
+    end
+
     println("  Training LSTM Energy Head: ", head)
     for epoch in 1:epochs
         grad = Flux.gradient(head) do m
-            wls_loss(m, h_final, delta_E, W_arr)
+            huber_loss(m, h_final, delta_E, W_arr)
         end
         Flux.update!(opt_state, head, grad[1])
 
         if epoch % 100 == 0 || epoch == 1 # trains super fast as so simple
-            l = wls_loss(head, h_final, delta_E, W_arr)
-            @printf("  LSTM Energy Head (Layers %s) epoch %d/%d  WLS-MSE = %.2e\n", string(hidden_layers), epoch, epochs, Float64(l))
+            mywls = wls_loss(head, h_final, delta_E, W_arr)
+            myhuber = huber_loss(head, h_final, delta_E, W_arr)
+            @printf("  LSTM Energy Head (Layers %s) epoch %d/%d  WLS-MSE = %.2e Huber-loss= %.2e\n", string(hidden_layers), 
+                    epoch, epochs, Float64(mywls), Float64(myhuber))
         end
     end
     Flux.testmode!(head)
