@@ -11,26 +11,27 @@ set tics nomirror
 set grid ytics lc rgb "#e0e0e0"
 
 # Move legend out of the way
-set key outside right top
+#set key outside right top
 
 set xrange [-100:100]
 set yrange [-0.1:0.20]
 
-# The Magic: Inline awk script to transpose rows -> columns
-file = "< awk '{for(i=1;i<=NF;i++) a[i,NR]=$i} END {for(i=1;i<=NF;i++) {for(j=1;j<=NR;j++) printf a[i,j] \" \"; print \"\"}}' reservoir.dat"
-
 # raw data as "rug plot" below y=0 (using rand(0) to jitter them vertically)
 # The smooth kdensity estimator for the actual distributions
-#
-# `for [i=1:*]` loops until it runs out of columns
+set datafile columnheaders
+stats 'reservoir.dat' using 0 every ::0::0 nooutput
+ # mad up command above to stop stats from reading whole file and bailing on all the NaN
+cols = STATS_columns
+print sprintf("Detected %d families.", cols)
 
-set samples 2000 # moar points in the kdensity thingy ==> less jagged 
+set samples 1000 # moar points in the kdensity thingy ==> less jagged 
+
 
 plot \
-    for [i=1:*] file using i:(-0.1+0.1*rand(0)) \
-        with points pt 7 ps 0.3 lc i notitle, \
-    for [i=1:*] file using i:(1/1000.0) \
-        smooth kdensity bandwidth 5 with lines lw 2 lc i title sprintf("Cycle %d", i)
+    for [i=1:cols] 'reservoir.dat' using i:(-0.1+0.1*rand(0)) \
+        with points pt 7 ps 0.3 lc i title columnhead, \
+    for [i=1:cols] '' using i:(1/1000.0) \
+        smooth kdensity bandwidth 5 with lines lw 2 lc i title sprintf("C %d: %s", i,columnhead(i))
 
 # set terminal pngcairo size 1000,600 font "Helvetica,12"
 # set output "reservoir.png"

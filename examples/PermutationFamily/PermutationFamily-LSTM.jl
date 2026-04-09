@@ -86,18 +86,21 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
     # Xs is (N, n_obs). trunk outputs (n_hidden, N, n_obs) in Flux
     hidden_seq = trunk(Xs)
     h_lstm = hidden_seq[:, end, :] # (n_hidden, n_obs) - the terminal representation
-#    n_hidden_in = size(h_final, 1) # dimension of hidden representation to be fed into our NN
+    #    n_hidden_in = size(h_final, 1) # dimension of hidden representation to be fed into our NN
 
     # Direct permutation features, to learn on
     Cmat = Halcyon.cycle_count_matrix(stats) # Always the cowboy, never the cow
     visited_mask = stats.count .> 0
-    Cmat_visited = Float32.(Cmat[visited_mask, :]') 
-    
-    h_final = vcat(h_lstm, Cmat_visited) # Shape: (n_hidden + N, n_obs)
-    n_hidden_in= size(h_final, 1)    
+    Cmat_visited = Float32.(Cmat[visited_mask, :]')
+
+    h_final = vcat(h_lstm, Cmat_visited ./ N) # Shape: (n_hidden + N, n_obs)
+    # scale CMAT to [0..1] so similar scale to LSTM. But does this matter?
+    # Perhaps switch to Lambda repr?
+
+    n_hidden_in = size(h_final, 1)
 
     @printf("Built features: size(h_lstm,1): %d size(Cmat_visited): %d n_hidden_in: %d\n",
-            size(h_lstm,1),size(Cmat_visited,1),n_hidden_in)
+        size(h_lstm, 1), size(Cmat_visited, 1), n_hidden_in)
 
     # 2. Build explicit numeric WLS (Weighted Least Squares) residual targets
     n_obs = count(c -> c > 0, stats.count)
@@ -108,8 +111,8 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
     # 3. Global (g_) variance for a Bayes prior on the sample variance
     # Filter out unvisited sectors (with a boolean mask)
     g_visited = stats.count .> 0
-    g_c    = stats.count[g_visited]
-    g_est  = stats.estimator[g_visited]
+    g_c = stats.count[g_visited]
+    g_est = stats.estimator[g_visited]
     g_est2 = stats.estimator2[g_visited]
     # Total variance across all samples 
     g_N = sum(g_c)
@@ -123,7 +126,7 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
         c_k = stats.count[k]
         if c_k > 0
             E_mean = stats.estimator[k] / c_k # sample (permutation family) mean
-            E_var  = max.((stats.estimator2[k] ./ c_k) .- E_mean.^2, 0.0) # sample var
+            E_var = max.((stats.estimator2[k] ./ c_k) .- E_mean .^ 2, 0.0) # sample var
 
             E_raw[idx] = Float32(E_mean)
 
@@ -143,8 +146,8 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
             var_smooth = (c_k .* E_var .+ γ * g_var) ./ (c_k .+ γ)
             W_arr[idx] = Float32(c_k) / var_smooth
             # Was directly using MC counts... incorporating variance blew out atteniont to trivial regions
-#            @printf("LSTM Var smooth: Cycle= %d c_k= %d g_var= %g E_var= %g var_smooth= %g W_arr[%d]= %g\n",
-#                    k,c_k,g_var,E_var,var_smooth,idx,W_arr[idx])
+            #            @printf("LSTM Var smooth: Cycle= %d c_k= %d g_var= %g E_var= %g var_smooth= %g W_arr[%d]= %g\n",
+            #                    k,c_k,g_var,E_var,var_smooth,idx,W_arr[idx])
             idx += 1
         end
     end
@@ -156,19 +159,31 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
     in_dim = n_hidden_in
     for h in hidden_layers
         if h > 0
-            push!(layers, Dense(in_dim => h, relu))
+            push!(layers, Dense(in_dim => h, gelu))
+            # gelu as apparently nicer for regression?
+
+            # mild dropout on wider hidden layers to regularise
+            if h >= 64
+                push!(layers, Dropout(0.1))
+            end
+
             in_dim = h
         end
     end
+    # Zero-init the Final Projection, so we start by following the Linear model / prior
+    #    push!(layers, Dense(in_dim => 1, init=Flux.zeros))
     push!(layers, Dense(in_dim => 1))
 
+
     head = Chain(layers...)
-    opt_state = Flux.setup(Adam(lr), head)
+    #opt_state = Flux.setup(Adam(lr), head)
     # 'Weight decay' is just L2 norm on weights (paramters of fit) penalising large vlaues
     # called weight-decy 'cause you add it as a constant to the gradient, so is noiseless
     # c.f. adding directly to the loss and back prop
-    #opt_state = Flux.setup(OptimiserChain(WeightDecay(1e-3), Adam(lr)), head)
+    opt_state = Flux.setup(OptimiserChain(WeightDecay(1e-3), Adam(lr)), head)
     #  Think this might be messing up the fits? Disabled for now. 
+    #     Actually that might have been galaxy-brain-Jarv weighting the Cmat matrix FOR
+    #     TRAINING, but not then doing the same at EVAL. 
 
     # Weighted Least Squares Loss over the empirical delta batch
     wls_loss(m, x, y, w) = sum(w' .* (m(x) .- y) .^ 2)
@@ -181,7 +196,7 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
         res = m(x) .- y
         abs_res = abs.(res)
         # 0.5 * x^2 if |x| <= δ, else δ * |x| - 0.5 * δ^2
-        losses = ifelse.(abs_res .<= δ, 0.5 .* abs_res.^2, δ .* (abs_res .- 0.5 .* δ^2))
+        losses = ifelse.(abs_res .<= δ, 0.5 .* abs_res .^ 2, δ .* (abs_res .- 0.5 .* δ^2))
         return sum(w' .* losses)
     end
 
@@ -195,8 +210,8 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
         if epoch % 100 == 0 || epoch == 1 # trains super fast as so simple
             mywls = wls_loss(head, h_final, delta_E, W_arr)
             myhuber = huber_loss(head, h_final, delta_E, W_arr)
-            @printf("  LSTM Energy Head (Layers %s) epoch %d/%d  WLS-MSE = %.2e Huber-loss= %.2e\n", string(hidden_layers), 
-                    epoch, epochs, Float64(mywls), Float64(myhuber))
+            @printf("  LSTM Energy Head (Layers %s) epoch %d/%d  WLS-MSE = %.2e Huber-loss= %.2e\n", string(hidden_layers),
+                epoch, epochs, Float64(mywls), Float64(myhuber))
         end
     end
     Flux.testmode!(head)
@@ -227,8 +242,8 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
         end
     end
 
-    h_f = vcat(trunk(xs)[:, end, :], Cmat') # I hate the way my life turned out 
-        # (hidden, n_families)
+    h_f = vcat(trunk(xs)[:, end, :], Cmat' ./ N) # I hate the way my life turned out 
+    # (hidden, n_families)
     delta_E_pred = Float64.(head(h_f)) # (1, n_families)
 
     cached_energies = [eval_energy(linear_model, C_from_rank(idx, N, stats.P)) + delta_E_pred[1, idx]
@@ -590,12 +605,22 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     # save reservoir of samples
     open("reservoir.dat", "w") do io
         println(io, "# Estimator reservoir")
+
+        # print permutation families as column heads
         for k in 1:MC_data.n_families
-            for E in MC_data.reservoir[k]
+            @printf(io, "\"%s\" ", C_from_rank(k, MC_data.N, MC_data.P))
+        end
+        @printf(io, "\n")
+
+        R = length(MC_data.reservoir[1])
+        for r in 1:R
+            for k in 1:MC_data.n_families
+                E = MC_data.reservoir[k][r]
                 if E == 0.0
-                    break
-                end # if as initialised, no more data; throughs off plots
-                @printf(io, "%g ", E)
+                    @printf(io, "NaN ") # if as initialised, no more data; throughs off plots
+                else
+                    @printf(io, "%g ", E)
+                end
             end
             @printf(io, "\n")
         end
@@ -657,7 +682,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     lstm_energy_shallow = fit_LSTMEnergyResidualModel(model_lstm_MAP, linearEmodel, MC_data; hidden_layers=(32,), epochs=500)
 
     println("\nTraining Deep Energy Head on MAP-on-DuBois LSTM trunk...")
-    lstm_energy_deep = fit_LSTMEnergyResidualModel(model_lstm_MAP, linearEmodel, MC_data; hidden_layers=(32,32,32,32,), epochs=500)
+    lstm_energy_deep = fit_LSTMEnergyResidualModel(model_lstm_MAP, linearEmodel, MC_data; hidden_layers=(128, 64, 32,), epochs=500)
 
     # ---------------------------------------------------------------
     # Compare KL divergences
@@ -794,7 +819,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 19 
+    Nmagic = 7
     magicsteps = 1_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
