@@ -575,7 +575,8 @@ end
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
     equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=1,
     lstm_epochs::Int=500, lstm_hidden::Int=64, lstm_embed::Int=16,
-    lstm_lr::Float64=3e-3, use_kelbg::Bool=true)
+    lstm_lr::Float64=3e-3, use_kelbg::Bool=true,
+    prefix="")
     λħ = 0.5
     (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
 
@@ -603,7 +604,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     @printf("\n MC Complete! N= %d  r_s= %g θ= %g  n_families= %d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, n_z)
 
     # save reservoir of samples
-    open("reservoir.dat", "w") do io
+    open("$(prefix)_reservoir.dat", "w") do io
         println(io, "# Estimator reservoir")
 
         # print permutation families as column heads
@@ -795,7 +796,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     q_lMAP = probabilities(model_lstm_MAP, MC_data)
     n_tot = sum(MC_data.count)
 
-    open("PermutationFamily_LSTM_comparison.dat", "w") do io
+    open("$(prefix)_PermutationFamily_LSTM_comparison.dat", "w") do io
         println(io, "# k  count  P_hat  P_mult  P_dubois  P_full  P_lstm_mult  P_lstm_DuBois  P_lstm_MAP  PC")
         for k in 1:MC_data.n_families
             c = MC_data.count[k]
@@ -806,7 +807,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
                 q_lmult[k], q_ldub[k], q_lMAP[k], string(C_k))
         end
     end
-    println("Wrote PermutationFamily_LSTM_comparison.dat")
+    println("Wrote $(prefix)_PermutationFamily_LSTM_comparison.dat")
 
     return MC_data, MC_biased, bias, models
 end
@@ -823,16 +824,16 @@ if abspath(PROGRAM_FILE) == @__FILE__
     magicsteps = 1_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
-    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps)
+    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq1")
     # DuBois Table 1: rs=10.0, theta=1.0 (N=33)
     #     Expected E/N: -0.0403 Ha
-    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps)
+    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq10")
 
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha
-    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps)
+    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
     # rs=10.0 -> -0.1038 Ha
-    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps)
+    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
 
     # Dornheim et al. 2025, JCP 163, 154101 - Reweighting estimator
     # MC_and_fit_model(; N=4, r_s=0.5, θ=1.0, steps=100_000_000,)

@@ -31,7 +31,7 @@ plot \
     for [i=1:cols] 'reservoir.dat' using i:(-0.1+0.1*rand(0)) \
         with points pt 7 ps 0.3 lc i title columnhead, \
     for [i=1:cols] '' using i:(1/1000.0) \
-        smooth kdensity bandwidth 5 with lines lw 2 lc i title sprintf("C %d: %s", i,columnhead(i))
+        smooth kdensity bandwidth 0.5 with lines lw 2 lc i title sprintf("C %d: %s", i,columnhead(i))
 
 # set terminal pngcairo size 1000,600 font "Helvetica,12"
 # set output "reservoir.png"
