@@ -11,6 +11,7 @@ include("worm.jl")        # Worm algorithm (Spada et al. 2022)
 include("PermutationFamily.jl") # following DeBois 2014, or at leat what I think they did
 include("LSTMPermutationModel.jl") # autoregressive LSTM for permutation sector probabilities
 include("analysis.jl")
+include("jacknife.jl")
 
 # Core types
 export System, WormConfiguration, WormParams
@@ -61,5 +62,8 @@ export LSTMPermutationModel
 export fit, probabilities, kl_divergence
 # Importance sampling
 export PermutationBias, make_permutation_bias
+
+# Jacknife
+export JackknifePermutationStats, jackknife_statistics, make_variance_optimised_bias
 
 end # module

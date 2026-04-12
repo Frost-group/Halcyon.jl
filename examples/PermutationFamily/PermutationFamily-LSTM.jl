@@ -163,9 +163,9 @@ function fit_LSTMEnergyResidualModel(prob_model::AbstractPermutationModel, linea
             # gelu as apparently nicer for regression?
 
             # mild dropout on wider hidden layers to regularise
-#            if h >= 64
-#                push!(layers, Dropout(0.1))
-#            end
+            #            if h >= 64
+            #                push!(layers, Dropout(0.1))
+            #            end
             # Jarv ~9-4-26 seems to stop it converging nicely c.f. shallow network. So turn
             # off for now? I mean, its not exactly a bit data regime, trying to fit the
             # permutation data... perhaps when N is large and we are not visiting all
@@ -573,6 +573,9 @@ function permutation_family_mc(sys, params; equil, steps, measure_every, show_pr
         parts[i] = permutation_family_mc_chain(sys, params; equil,
             steps=nstep, measure_every, seed=base + UInt64(i), prog=prog)
     end
+
+    jackknife_statistics(parts)
+
     reduce(merge_stats, parts)
 end
 
@@ -825,16 +828,16 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 7 
+    Nmagic = 7
     magicsteps = 10_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
-    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq1")
+#    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq1")
     # DuBois Table 1: rs=10.0, theta=1.0 (N=33)
     #     Expected E/N: -0.0403 Ha
-    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq10")
+#    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq10")
 
-    magicsteps = 100_000_000
+    magicsteps = 10_000_000
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha
     MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
