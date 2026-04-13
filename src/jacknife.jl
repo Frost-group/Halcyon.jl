@@ -36,7 +36,7 @@ Base.show(io::IO, obj::JackknifePermutationStats) = dump(io, obj; maxdepth=1)
 """
     jackknife_statistics(parts::Vector{DensePermutationFamilyStats}) -> JackknifePermutationStats
 
-Calculates Jackknife reduced-bias estimators and standard errors by treating each element of `parts` 
+Calculates Jackknife reduced-bias estimators and standard errors by treating each element of `parts`
 as an independent block (e.g. from threaded MC chains).
 """
 function jackknife_statistics(parts::Vector{DensePermutationFamilyStats})
@@ -99,7 +99,7 @@ function jackknife_statistics(parts::Vector{DensePermutationFamilyStats})
             end
         end
 
-        # calculate Jackknife statistics  
+        # calculate Jackknife statistics
         p_k_jack[k] = sum(p_pseudo) / n_chains
         var_p = sum(x -> (x - p_k_jack[k])^2, p_pseudo) / (n_chains - 1)
         p_k_se[k] = sqrt(max(0.0, var_p / n_chains))
@@ -120,12 +120,15 @@ function jackknife_statistics(parts::Vector{DensePermutationFamilyStats})
 
     # ToDo: make this ootional?
     @printf("Jackknife statistics calculated for N=%d, n_families=%d, Z=%d\n", N, n_families, Z_full)
-    @printf("p_k_jack: %s\n", p_k_jack)
-    @printf("p_k_se: %s\n", p_k_se)
-    @printf("E_k_jack: %s\n", E_k_jack)
-    @printf("E_k_se: %s\n", E_k_se)
-    @printf("pE_k_jack: %s\n", pE_k_jack)
-    @printf("pE_k_se: %s\n", pE_k_se)
+    if n_families < 50
+        @printf("p_k_jack: %s\n", p_k_jack)
+        @printf("p_k_se: %s\n", p_k_se)
+        @printf("E_k_jack: %s\n", E_k_jack)
+        @printf("E_k_se: %s\n", E_k_se)
+        @printf("pE_k_jack: %s\n", pE_k_jack)
+        @printf("pE_k_se: %s\n", pE_k_se)
+    end
+
     @printf("Jacknife Bosonic E: %f +/- %f\n", sum(pE_k_jack), sum(pE_k_se))
     @printf("Naive Bosonic E: %f\n", sum(full_sums) / Z_full)
 
@@ -133,35 +136,6 @@ function jackknife_statistics(parts::Vector{DensePermutationFamilyStats})
         N, n_families, P, total_Z=Z_full,
         p_k_jack, p_k_se, E_k_jack, E_k_se, pE_k_jack, pE_k_se
     )
-end
-
-"""
-    make_variance_optimised_bias(jk::JackknifePermutationStats; α=1.0) -> PermutationBias
-
-Construct a bias vector targeting sectors that cause the most variance in the global energy estimator.
-The variance of the global estimator is sum Var(pE_k), .'. target probabilities π_k ∝ SE(pE_k). 
-Uses softmax-like exponentiation with parameter α to shape the strength.
-"""
-function make_variance_optimised_bias(jk::JackknifePermutationStats; α::Float64=1.0)
-    # conditional broadcasting (!)
-    target = @. ifelse(jk.pE_k_se > 0.0, jk.pE_k_se^α, 0.0)
-
-    tot_energy_error = sum(target)
-    if tot_energy_error > 0.0
-        target ./= tot_energy_error
-    else
-        # Fallback to flat if no variance measured 
-        # (e.g. 0-step simulation or flat estimators)
-        #  or should we error here? 
-        target .= 1.0 / jk.n_families
-    end
-
-    # PermutationBias takes log probs; bit of an overloading, perhaps just create object here?
-    log_p = @. ifelse(target > 0.0, log(target), -1e6)
-
-    # CODE NOT TESTED YET
-
-    return PermutationBias(jk.P, log_p, α)
 end
 
 """
@@ -249,6 +223,39 @@ function calculate_reweighted_sign(model::AbstractPermutationModel, stats::Dense
     return val
 end
 
+
+# ===================================================================
+# Importance Sampling: PermutationBias constructor (object in types.jl)
+# ===================================================================
+
+"""
+    make_permutation_bias(model, stats; α=1.0) -> PermutationBias
+
+Construct a bias table from a fitted AbstractPermutationModel.
+"""
+function make_permutation_bias(model::AbstractPermutationModel,
+    stats::DensePermutationFamilyStats; α::Float64=1.0)
+    q = probabilities(model, stats)
+    log_p = [q[k] > 0 ? log(q[k]) : -Inf for k in 1:stats.n_families]
+    PermutationBias(stats.P, log_p, α)
+end
+
+"""
+    make_variance_optimised_bias(jk::JackknifePermutationStats; α=1.0) -> PermutationBias
+
+Construct a bias vector targeting sectors that cause the most variance in the global energy estimator.
+The variance of the global estimator is sum Var(pE_k), .'. target probabilities π_k ∝ SE(pE_k).
+Uses softmax-like exponentiation with parameter α to shape the strength.
+"""
+function make_variance_optimised_bias(jk::JackknifePermutationStats; α::Float64=1.0)
+    # conditional broadcasting (!)
+    q = @. ifelse(jk.pE_k_se > 0.0, jk.pE_k_se^α, 0.0)
+    tot_energy_error = sum(q)
+    q ./= tot_energy_error # normalise probability
+    log_p = [q[k] > 0 ? log(q[k]) : -Inf for k in 1:jk.n_families]
+    PermutationBias(jk.P, log_p, α)
+end
+
 # ===================================================================
 # Importance Sampling: post-MC debiasing
 # ===================================================================
@@ -303,4 +310,3 @@ function debiased_mc_energy(stats::DensePermutationFamilyStats,
     end
     return Etot / Z_sign, Z_sign
 end
-

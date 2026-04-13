@@ -80,9 +80,11 @@ function permutation_family_mc(sys, params; equil, steps, measure_every, show_pr
             steps=nstep, measure_every, seed=base + UInt64(i), prog=prog)
     end
 
-    jackknife_statistics(parts)
+    jk = jackknife_statistics(parts)
 
-    reduce(merge_stats, parts)
+    aggregate_statistics = reduce(merge_stats, parts)
+
+    return (aggregate_statistics, jk)
 end
 
 
@@ -112,7 +114,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     @printf("Calculated Yakub-Ronchi background N= %d L= %g E= %g Ha\n", N, L, E_bg)
 
     println("Running threaded MC...")
-    MC_data = permutation_family_mc(sys, params; equil, steps, measure_every)
+    MC_data, jk = permutation_family_mc(sys, params; equil, steps, measure_every)
 
     n_z = sum(MC_data.count)
     @printf("\n MC Complete! N= %d  r_s= %g θ= %g  n_families= %d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, n_z)
@@ -149,7 +151,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     println("DensePermutationFamilyStats  N=$N  p(N)=$(MC_data.n_families)  ",
         "size=$(Base.summarysize(MC_data) ÷ 1024) KiB")
     E_MC, sigma = calculate_mc_energy(MC_data)
-    @printf("E_MC= %.8f σ=  %.8f E_MC/N= %.8f Ha = %.8f Ry (including Yakub-Ronchi Jellium background)\n",
+    @printf("E_MC= %.8f signσ=  %.8f E_MC/N= %.8f Ha = %.8f Ry (including Yakub-Ronchi Jellium background)\n",
         E_MC + N * E_bg, sigma, (E_MC + N * E_bg) / N, 2 * (E_MC + N * E_bg) / N)
 
     # OK, now we start doing the weird stuff! What Would Ceperley Do? (WWCD?)
@@ -159,7 +161,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     linearEmodel = fit_LinearEnergyModel(LinearEnergyModel, MC_data; λ_smooth=smoothness)
     @show linearEmodel
     E_lin = calculate_reweighted_energy(fit(MultiplicityModel, MC_data), linearEmodel, MC_data) + (N * E_bg)
-    @printf("E_Linear= %.8f σ=  %.8f E_Linear/N= %.8f Ha = %.8f Ry (including Yakub-Ronchi Jellium background)\n",
+    @printf("E_Linear= %.8f signσ=  %.8f E_Linear/N= %.8f Ha = %.8f Ry (including Yakub-Ronchi Jellium background)\n",
         E_lin, sigma, E_lin / N, 2 * E_lin / N)
 
 
@@ -213,7 +215,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     ]
 
     @printf("\n# Estimates: (including Yakub-Ronchi Jellium background)")
-    @printf("\n\n%-30s KL= %8.4f σ= %8.4f E= %8.2f E/N= %8.4f Ha = %8.4f Ry\n",
+    @printf("\n\n%-30s KL= %8.4f signσ= %8.4f E= %8.2f E/N= %8.4f Ha = %8.4f Ry\n",
         "MC/MC", 0.0,
         sigma, E_MC + N * E_bg, (E_MC + N * E_bg) / N, 2 * (E_MC + N * E_bg) / N)
     # really need to write a fn to eval with the linear engine moodel, but take the counts direcyl from MC
@@ -226,10 +228,10 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         E_shallow = calculate_reweighted_energy(m, lstm_energy_shallow, MC_data) + (N * E_bg)
         E_deep = calculate_reweighted_energy(m, lstm_energy_deep, MC_data) + (N * E_bg)
 
-        #        @printf("%-30s KL=%8.4f σ=% 8.4f \n\tE_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
+        #        @printf("%-30s KL=%8.4f signσ=% 8.4f \n\tE_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
         #            label, KL, avgsign, 2 * E / N, 2 * E_lin / N, 2 * E_shallow / N, 2 * E_deep / N)
 
-        @printf("  %-30s KL=%8.4f σ=% 8.4f | E_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
+        @printf("  %-30s KL=%8.4f signσ=% 8.4f | E_MC/N % 8.4f Ry | E_Lin/N % 8.4f Ry | E_Shal/N % 8.4f Ry | E_Deep/N % 8.4f Ry\n",
             label, KL, avgsign,
             2 * E / N, 2 * E_lin / N, 2 * E_shallow / N, 2 * E_deep / N)
 
@@ -247,14 +249,16 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     bias_α = 0.7  # gentle softening; α=1.0 for full flat-histogram; sort of Wang-Landau
     # experiments showed α=1.0 was terrible - threw MC into the OPPOSITE undersampling, i.e.
     # forced condensation if not present
-    biasmodel = model_lstm_MAP
-    bias = make_permutation_bias(biasmodel, MC_data; α=bias_α)
+    #    biasmodel = model_lstm_MAP
+    #    bias = make_permutation_bias(biasmodel, MC_data; α=bias_α)
+    biasmodel = "jackknife"
+    bias = make_variance_optimised_bias(jk; α=bias_α) # jacknife bias: minimise p*E error
 
     println("\n#### Biased MC (α=$bias_α, model=$biasmodel) ####")
     params_biased = default_worm_params(sys)
     params_biased.bias = bias
 
-    MC_biased = permutation_family_mc(sys, params_biased; equil, steps, measure_every)
+    MC_biased, jk = permutation_family_mc(sys, params_biased; equil, steps, measure_every)
 
     MC_biased_permutation_histogram = permutation_histogram_from_stats(MC_biased)
     @printf("MC Biased P(ℓ): [%s]\n", join([@sprintf("%.4f", x) for x in MC_biased_permutation_histogram], ", "))
@@ -269,7 +273,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     # ── Debiased energy estimator ──
     E_debiased, sign_debiased = debiased_mc_energy(MC_biased, bias)
     println("> probability factor of one to one ... we have normality, I repeat we  have  normality.")
-    @printf("  E_MC_debiased = %.8f  σ=%.4f  E/N= %.8f Ha = %.8f Ry\n",
+    @printf("  E_MC_debiased = %.8f  signσ=%.4f  E/N= %.8f Ha = %.8f Ry\n",
         E_debiased + N * E_bg, sign_debiased,
         (E_debiased + N * E_bg) / N, 2 * (E_debiased + N * E_bg) / N)
 
@@ -334,14 +338,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 7
-    magicsteps = 10_000_000
+    Nmagic = 19
+    magicsteps = 50_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
-#    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq1")
+    #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq1")
     # DuBois Table 1: rs=10.0, theta=1.0 (N=33)
     #     Expected E/N: -0.0403 Ha
-#    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq10")
+    #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq10")
 
     magicsteps = 10_000_000
     # Low temperature: theta=0.125
@@ -355,4 +359,3 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # N=4,28 ('standard reference')
     # N=40,66 in other figures
 end
-
