@@ -72,7 +72,7 @@ export eval_energy_at_rank, eval_energy
 export fit_LSTMEnergyResidualModel, fit_LinearEnergyModel
 
 # Jacknife
-export JackknifePermutationStats, jackknife_statistics, make_variance_optimised_bias
+export JackknifePermutationStats, jackknife_statistics, jackknife_error_guide 
 export calculate_reweighted_energy, calculate_mc_energy, calculate_reweighted_sign
 export debiased_empirical_probabilities, debiased_mc_energy
 

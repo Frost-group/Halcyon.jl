@@ -249,10 +249,10 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     bias_α = 0.7  # gentle softening; α=1.0 for full flat-histogram; sort of Wang-Landau
     # experiments showed α=1.0 was terrible - threw MC into the OPPOSITE undersampling, i.e.
     # forced condensation if not present
-    #    biasmodel = model_lstm_MAP
-    #    bias = make_permutation_bias(biasmodel, MC_data; α=bias_α)
+    biasmodel = model_lstm_MAP
+    bias = make_permutation_bias(biasmodel, MC_data; α=bias_α)
     biasmodel = "jackknife"
-    bias = make_variance_optimised_bias(jk; α=bias_α) # jacknife bias: minimise p*E error
+    bias = jackknife_error_guide(bias, jk; α=bias_α) # jacknife bias: minimise p*E error
 
     println("\n#### Biased MC (α=$bias_α, model=$biasmodel) ####")
     params_biased = default_worm_params(sys)
@@ -338,8 +338,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 7
-    magicsteps = 50_000_000
+    Nmagic = 19
+    magicsteps = 6_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq1")
@@ -347,10 +347,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
     #     Expected E/N: -0.0403 Ha
     #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq10")
 
-    magicsteps = 10_000_000
+#    magicsteps = 1_000_000
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha
-    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
+    #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
     # rs=10.0 -> -0.1038 Ha
     MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
 
