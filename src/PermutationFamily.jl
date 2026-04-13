@@ -11,6 +11,8 @@
 # Dense ranking into 1:p(N) uses the standard integer partition count table P
 # to establish a bijection between C-vectors and ranks.
 
+using Random
+
 # ===================================================================
 # Integer partition count table P[n+1, m+1]
 # ===================================================================
@@ -276,6 +278,43 @@ function observe_permutation_family_reservoir!(stats::DensePermutationFamilyStat
     end
 end
 
+function permutation_histogram_from_stats(stats::DensePermutationFamilyStats)
+    N = stats.N
+    n_z = sum(stats.count)
+
+    hist = zeros(Int, N) # for each cycle
+
+    for k in 1:stats.n_families
+        if stats.count[k] > 0
+            C_k = C_from_rank(k, N, stats.P)
+            for i in 1:N
+                hist[i] += C_k[i] * stats.count[k]
+            end
+        end
+    end
+
+    return hist ./ n_z
+end
+
+function merge_stats(a::DensePermutationFamilyStats, b::DensePermutationFamilyStats)
+    a.N == b.N && a.n_families == b.n_families || throw(ArgumentError("merge_stats"))
+
+    # initially I dot-added the elements of the reservoir like an idiot
+    # Helper function: returns a memory-efficient view of only the filled samples
+    valid(x, k) = view(x.reservoir[k], 1:min(x.count[k], length(x.reservoir[k])))
+    # Map over all families to create the new merged reservoirs
+    merged_res = map(1:a.n_families) do k
+        pool = shuffle!(vcat(valid(a, k), valid(b, k)))
+        keep = min(length(pool), length(a.reservoir[k]))
+
+        out = zeros(Float64, length(a.reservoir[k]))
+        out[1:keep] .= view(pool, 1:keep)
+        out # Implicit return for the map
+    end
+
+    return DensePermutationFamilyStats(a.N, a.P, a.n_families,
+        a.count .+ b.count, a.estimator .+ b.estimator, a.estimator2 .+ b.estimator2, merged_res)
+end
 
 # ===================================================================
 # Accessor functions on DensePermutationFamilyStats

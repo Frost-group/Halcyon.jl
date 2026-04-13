@@ -163,3 +163,144 @@ function make_variance_optimised_bias(jk::JackknifePermutationStats; α::Float64
 
     return PermutationBias(jk.P, log_p, α)
 end
+
+"""
+    calculate_reweighted_energy(model::AbstractPermutationModel, stats::DensePermutationFamilyStats)
+
+Calculate the expectation value of the energy with our model prob; not hte MC prob.
+"""
+function calculate_reweighted_energy(model::AbstractPermutationModel, stats::DensePermutationFamilyStats)
+    q = probabilities(model, stats)
+    N = stats.N
+
+    Etot = 0.0
+    Z_sign = 0.0
+    for k in 1:stats.n_families
+        if stats.count[k] > 0
+            # Conditional mean energy in sector k
+            E_k = stats.estimator[k] / stats.count[k]
+
+            C_k = C_from_rank(k, N, stats.P)
+            n_cycles = sum(C_k)
+            sigma = iseven(N - n_cycles) ? 1.0 : -1.0
+
+            Etot += sigma * q[k] * E_k
+            Z_sign += sigma * q[k]
+        end
+    end
+    return Etot / Z_sign
+end
+
+function calculate_reweighted_energy(prob_model::AbstractPermutationModel, en_model::AbstractEnergyModel, stats::DensePermutationFamilyStats)
+    q = probabilities(prob_model, stats)
+    N = stats.N
+
+    Etot = 0.0
+    Z_sign = 0.0
+    for k in 1:stats.n_families
+        C_k = C_from_rank(k, N, stats.P) # grab the permutation-family / cycle vector
+        E_k = eval_energy_at_rank(en_model, k, C_k) # extracted efficiently if cached
+        # expectation is that we will need to fit an LSTM for the win
+
+        n_cycles = sum(C_k)
+        sigma = iseven(N - n_cycles) ? 1.0 : -1.0 # sign, should make this a fictitious option
+
+        Etot += sigma * q[k] * E_k # do you see the magic? NO DIRECT MC QUANTITY HERE!
+        Z_sign += sigma * q[k]
+    end
+    return Etot / Z_sign # and don't forget!
+end
+
+
+function calculate_mc_energy(stats::DensePermutationFamilyStats)
+    N = stats.N
+    n_z = sum(stats.count)
+
+    Etot = 0.0
+    Z_sign = 0.0
+    for k in 1:stats.n_families
+        if stats.count[k] > 0
+            # Conditional mean energy in sector k
+            E_k = stats.estimator[k] / stats.count[k]
+
+            C_k = C_from_rank(k, N, stats.P)
+            n_cycles = sum(C_k)
+            sigma = iseven(N - n_cycles) ? 1.0 : -1.0
+
+            p_k = stats.count[k] / n_z
+            Etot += sigma * p_k * E_k
+            Z_sign += sigma * p_k
+        end
+    end
+    return Etot / Z_sign, Z_sign
+end
+
+function calculate_reweighted_sign(model::AbstractPermutationModel, stats::DensePermutationFamilyStats)
+    q = probabilities(model, stats)
+    N = stats.N
+
+    val = 0.0
+    for k in 1:stats.n_families
+        C_k = C_from_rank(k, N, stats.P)
+        n_cycles = sum(C_k)
+        sigma = iseven(N - n_cycles) ? 1.0 : -1.0
+        val += q[k] * sigma
+    end
+    return val
+end
+
+# ===================================================================
+# Importance Sampling: post-MC debiasing
+# ===================================================================
+
+"""
+    debiased_empirical_probabilities(stats, bias) -> Vector{Float64}
+
+Recover true sector probabilities from biased MC counts.
+Under bias 1/p^α, raw counts satisfy n_k ∝ π_k / p_k^α.
+True probabilities: π̂_k = n_k · p_k^α / Σ_j n_j · p_j^α.
+"""
+function debiased_empirical_probabilities(stats::DensePermutationFamilyStats,
+    bias::Union{Nothing,PermutationBias})
+    if bias === nothing
+        return empirical_probabilities(stats)
+    end
+    w = zeros(Float64, stats.n_families)
+    for k in 1:stats.n_families
+        if stats.count[k] > 0
+            w[k] = stats.count[k] * exp(bias.α * bias.log_p[k])
+        end
+    end
+    Σ = sum(w)
+    Σ == 0 && error("No observations recorded")
+    return w ./ Σ
+end
+
+"""
+    debiased_mc_energy(stats, bias) -> (E, avg_sign)
+
+Fermion energy estimator from biased MC data.
+Debiased sector probabilities × raw conditional-mean energies.
+"""
+function debiased_mc_energy(stats::DensePermutationFamilyStats,
+    bias::Union{Nothing,PermutationBias})
+    p_hat = debiased_empirical_probabilities(stats, bias)
+    N = stats.N
+
+    Etot = 0.0
+    Z_sign = 0.0
+    for k in 1:stats.n_families
+        if stats.count[k] > 0
+            E_k = stats.estimator[k] / stats.count[k]
+
+            C_k = C_from_rank(k, N, stats.P)
+            n_cycles = sum(C_k)
+            σ = iseven(N - n_cycles) ? 1.0 : -1.0
+
+            Etot += σ * p_hat[k] * E_k
+            Z_sign += σ * p_hat[k]
+        end
+    end
+    return Etot / Z_sign, Z_sign
+end
+

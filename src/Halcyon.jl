@@ -6,12 +6,13 @@ module Halcyon
 
 include("potentials.jl")
 include("types.jl")       # System, WormConfiguration, WormParams
-include("exact.jl")
+include("exact.jl")       # exact solutions, some used for sim setup, some for validation
 include("worm.jl")        # Worm algorithm (Spada et al. 2022)
 include("PermutationFamily.jl") # following DeBois 2014, or at leat what I think they did
 include("LSTMPermutationModel.jl") # autoregressive LSTM for permutation sector probabilities
-include("analysis.jl")
-include("jacknife.jl")
+include("EnergyModel.jl") # Models to predict energy of permutation families
+include("jacknife.jl") # Jacknife stats, but also debiasing / reweighting logic
+include("analysis.jl") # misc analysis functions; some heavily outdated
 
 # Core types
 export System, WormConfiguration, WormParams
@@ -54,6 +55,8 @@ export ideal_fermion_permutation_P_l
 export integer_partition_count_table, permutation_family_count
 export permutation_family_C, C_to_rank, C_from_rank
 export DensePermutationFamilyStats, observe_permutation_family!, observe_permutation_family_reservoir!
+# manipulate MC stats object
+export merge_stats, permutation_histogram_from_stats
 # Accessors on DensePermutationFamilyStats
 export log_multiplicities, cycle_count_matrix, empirical_probabilities
 # Permutation sector models
@@ -63,7 +66,14 @@ export fit, probabilities, kl_divergence
 # Importance sampling
 export PermutationBias, make_permutation_bias
 
+# EnergyModel
+export AbstractEnergyModel, LinearEnergyModel, LSTMEnergyResidualModel 
+export eval_energy_at_rank, eval_energy
+export fit_LSTMEnergyResidualModel, fit_LinearEnergyModel
+
 # Jacknife
 export JackknifePermutationStats, jackknife_statistics, make_variance_optimised_bias
+export calculate_reweighted_energy, calculate_mc_energy, calculate_reweighted_sign
+export debiased_empirical_probabilities, debiased_mc_energy
 
 end # module
