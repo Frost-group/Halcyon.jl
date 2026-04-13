@@ -1,7 +1,7 @@
 # PermutationFamily — conjugacy class / permutation sector representation
 #
-#  ≈ conjugacy class of S_N 
-#  ≈ DeBois 'cycle type' and 'permutation sector' 
+#  ≈ conjugacy class of S_N
+#  ≈ DeBois 'cycle type' and 'permutation sector'
 #  ≈ formally we exploit the isomorphism to the integer partition table of N,
 #    https://discrete.openmathbooks.org/more/mdm/sec_adv-linearparts.html
 #
@@ -48,7 +48,7 @@ function integer_partition_count_table(nmax::Int)
 end
 
 """Number of permutation families (conjugacy classes) for `N` particles: p(N).
-This should be an exact equivalent to the Ramachandran-Hardy approximation. 
+This should be an exact equivalent to the Ramachandran-Hardy approximation.
 """
 permutation_family_count(N::Int, P::Matrix{Int}) = P[N+1, N+1]
 
@@ -186,23 +186,23 @@ end
 """
     DensePermutationFamilyStats(N)
 
-OK, here's the magic! 
+OK, here's the magic!
   (OK, maybe not magic. Maybe its dumb. But anyhoo, gotta start somewhere!)
  This is a Dense set of P(N) (permutation families, perhaps more formally conjugacy classes
- of the symmetric group S_N for N particles) elements, 
+ of the symmetric group S_N for N particles) elements,
 
 'count' to count the raw number of MC obsrvations
-'estimator' with a running increment of ALL observations. 
-(changed to this rather than a running mean as I remembered IEEE floats are exaft in addition?) 
+'estimator' with a running increment of ALL observations.
+(changed to this rather than a running mean as I remembered IEEE floats are exaft in addition?)
 
 The size of this scales exponentially, but that exponential (O(sqrt(N))) is a HELLA LOT BETTER than N!
 
 Name is a little historic: first I was playing with just Dict's (i.e. just hash unique cycle
 defn), but thought that standarising on λ representation and reading enough
-Wikipedia/Mathematica/Scary books on S_n group to get a dense object was more satisfying. 
+Wikipedia/Mathematica/Scary books on S_n group to get a dense object was more satisfying.
 
-ToDo: Think about manipulating the ranking so that most probably cycles are near each other? 
-But then again, if I'm going down that fancy MC reweighting route, this is irrelevant and probably just extra complexity. 
+ToDo: Think about manipulating the ranking so that most probably cycles are near each other?
+But then again, if I'm going down that fancy MC reweighting route, this is irrelevant and probably just extra complexity.
 
 
 Dense histogram over all p(N) conjugacy classes of Sₙ.
@@ -224,20 +224,20 @@ struct DensePermutationFamilyStats
     reservoir::Vector{Vector{Float64}}
 end
 # FIXME: now immutable struct, but still have count & estimator as mutable vectors?
-#  Not sure if this is still a problem? Or whether once instantiated, Julia kmows everything there is to know 
+#  Not sure if this is still a problem? Or whether once instantiated, Julia kmows everything there is to know
 
 function DensePermutationFamilyStats(N::Int; reservoir=true)
     P = integer_partition_count_table(N)
     pn = P[N+1, N+1]
-    res= reservoir ? [zeros(Float64, 5000) for _ in 1:pn] : zeros(Float64,0)
+    res = reservoir ? [zeros(Float64, 5000) for _ in 1:pn] : zeros(Float64, 0)
 
-    DensePermutationFamilyStats(N, 
-                                P, 
-                                pn, 
-                                zeros(Int64, pn), 
-                                zeros(Float64, pn), 
-                                zeros(Float64, pn), 
-                                res )
+    DensePermutationFamilyStats(N,
+        P,
+        pn,
+        zeros(Int64, pn),
+        zeros(Float64, pn),
+        zeros(Float64, pn),
+        res)
 end
 
 """
@@ -259,13 +259,13 @@ function observe_permutation_family_reservoir!(stats::DensePermutationFamilyStat
     stats.estimator[k] += E
     stats.estimator2[k] += E^2
 
-# Yeah we should take a trip to the reservoir
-# I heard you cast off and she sailed real fine
-# https://www.youtube.com/watch?v=Ien2w-MfNTg
+    # Yeah we should take a trip to the reservoir
+    # I heard you cast off and she sailed real fine
+    # https://www.youtube.com/watch?v=Ien2w-MfNTg
 
     c = stats.count[k]
     res_size = length(stats.reservoir[k])
-    
+
     if c <= res_size
         # Fill 'er up
         stats.reservoir[k][c] = E
@@ -331,7 +331,7 @@ This is the combinatorial weight of sector k in S_N.
 
 Can also be seen as the probability of the permutation family, n the
 high-temperature / classical limit (T=∞), where all the quantumness drops away
-and we are just left with the degeneracy of the microstates.  
+and we are just left with the degeneracy of the microstates.
 """
 function log_multiplicities(stats::DensePermutationFamilyStats)
     N = stats.N
@@ -541,20 +541,3 @@ function fit(::Type{MAPHybridModel}, stats::DensePermutationFamilyStats;
     θ = θ_prior .+ δ
     MAPHybridModel(prior, τ₀, δ, θ)
 end
-
-# ===================================================================
-# Importance Sampling: PermutationBias constructor
-# ===================================================================
-
-"""
-    make_permutation_bias(model, stats; α=1.0) -> PermutationBias
-
-Construct a bias table from a fitted AbstractPermutationModel.
-"""
-function make_permutation_bias(model::AbstractPermutationModel,
-    stats::DensePermutationFamilyStats; α::Float64=1.0)
-    q = probabilities(model, stats)
-    log_p = [q[k] > 0 ? log(q[k]) : -Inf for k in 1:stats.n_families]
-    PermutationBias(stats.P, log_p, α)
-end
-

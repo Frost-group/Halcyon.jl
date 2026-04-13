@@ -11,7 +11,7 @@ include("worm.jl")        # Worm algorithm (Spada et al. 2022)
 include("PermutationFamily.jl") # following DeBois 2014, or at leat what I think they did
 include("LSTMPermutationModel.jl") # autoregressive LSTM for permutation sector probabilities
 include("EnergyModel.jl") # Models to predict energy of permutation families
-include("jacknife.jl") # Jacknife stats, but also debiasing / reweighting logic
+include("jackknife.jl") # Jacknife stats, but also debiasing / reweighting logic
 include("analysis.jl") # misc analysis functions; some heavily outdated
 
 # Core types
