@@ -241,11 +241,15 @@ function make_permutation_bias(model::AbstractPermutationModel,
 end
 
 """
-    make_variance_optimised_bias(jk::JackknifePermutationStats; α=1.0) -> PermutationBias
+    jackknife_error_guide(bias::PermutationBias, jk::JackknifePermutationStats; α=1.0) -> PermutationBias
 
-Construct a bias vector targeting sectors that cause the most variance in the global energy estimator.
-The variance of the global estimator is sum Var(pE_k), .'. target probabilities π_k ∝ SE(pE_k).
-Uses softmax-like exponentiation with parameter α to shape the strength.
+Modify a flat-histogram probability model, to include optimal allocation based on the
+jackknife standard errors for the different sectors. 
+
+The variance of the global estimator is sum Var(pE_k), .'. target probabilities π_k ∝ SE(p
+* E_k).  Currently just the standard error of the Bosonic error, rather than try and play
+around with the Fermionic signs.
+
 """
 function jackknife_error_guide(bias::PermutationBias, jk::JackknifePermutationStats; α::Float64=1.0)
     # conditional broadcasting (!)
@@ -255,9 +259,9 @@ function jackknife_error_guide(bias::PermutationBias, jk::JackknifePermutationSt
     q = q ./ sum(q) # normalise probability
     min = 1e-4 * 1/jk.n_families # minimum intent: 1e-4 * natural occurance. Perhaps use number of microstates / degerenacy?
     log_p = [q[k] > min ? -log(q[k]) : -log(min) for k in 1:jk.n_families]
-    @printf("jacknife_error_guide: q= %s log_p= %s\n", q, log_p)
+    jk.n_families<20 && @printf("jacknife_error_guide: q= %s log_p= %s\n", q, log_p)
     log_p .+= bias.log_p # mix in previous guidance
-    @printf("jacknife_error_guide, combined: log_p= %s\n", log_p)
+    jk.n_families<20 && @printf("jacknife_error_guide, combined: log_p= %s\n", log_p)
     PermutationBias(jk.P, log_p, α)
 end
 

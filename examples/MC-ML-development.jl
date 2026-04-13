@@ -246,7 +246,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     # ===============================================================
     # Importance-sampled MC using fitted model as bias
     # ===============================================================
-    bias_α = 0.7  # gentle softening; α=1.0 for full flat-histogram; sort of Wang-Landau
+    bias_α = 1.0  # gentle softening; α=1.0 for full flat-histogram; sort of Wang-Landau
     # experiments showed α=1.0 was terrible - threw MC into the OPPOSITE undersampling, i.e.
     # forced condensation if not present
     biasmodel = model_lstm_MAP
@@ -338,7 +338,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
-    Nmagic = 19
+    Nmagic = 33
     magicsteps = 6_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
