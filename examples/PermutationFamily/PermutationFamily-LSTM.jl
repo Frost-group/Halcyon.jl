@@ -1,10 +1,13 @@
 # PermutationFamily-LSTM.jl
-# Trains the LSTM autoregressive model on ideal-fermion MC data and compares
+# Trains the LSTM autoregressive model on  MC data and compares
 # KL divergence against the exponential family models.
 # Three LSTM variants are fitted:
 #   1. No prior (flat logit bias)
 #   2. Multiplicity prior (combinatorial M(λ) factors for free)
 #   3. DuBois prior (M(λ) + exchange penalty κ)
+# Then also added an energy-model family (both linear models now following DuBois, and LSTMs on top of this)
+# And also Wang-Landau style guided MC to try and flatten the histogram
+#  Next step is to intend to bring this functionality into the main package, but leaving this here for reference.
 
 using Halcyon
 using Printf
@@ -22,6 +25,7 @@ ueg_box_length(N::Int, r_s::Float64) = (N / ueg_density_3d(r_s))^(1 / 3)
 """Fermi wavevector for fully spin-polarised 3D gas."""
 fermi_wavenumber_polarised(n::Float64) = (6π^2 * n)^(1 / 3)
 
+"""Fermi wavevector for unpolarised 3D gas. NOTE WE ONLY SUPPORT FULLY SPIN POLARISED CURRENTLY."""
 fermi_wavenumber_unpolarised(n::Float64) = (3π^2 * n)^(1 / 3)
 
 """Returns (L, β, E_F, n, k_F) for given degeneracy temperature θ = T/E_F."""
