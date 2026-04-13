@@ -249,10 +249,13 @@ Uses softmax-like exponentiation with parameter α to shape the strength.
 """
 function make_variance_optimised_bias(jk::JackknifePermutationStats; α::Float64=1.0)
     # conditional broadcasting (!)
-    q = @. ifelse(jk.pE_k_se > 0.0, jk.pE_k_se^α, 0.0)
-    tot_energy_error = sum(q)
-    q ./= tot_energy_error # normalise probability
+    q = @. ifelse(jk.pE_k_se > 0.0, 1 / jk.pE_k_se, 0.0)
+    # OK, experiments thing this is too harsh: only observe first sector after this (!)
+    # I need to think a bit harder about turning the jacknife standard error into a probability to revisit.
+    tot_pseudo_prob = sum(q)
+    q ./= tot_pseudo_prob # normalise probability
     log_p = [q[k] > 0 ? log(q[k]) : -Inf for k in 1:jk.n_families]
+    @printf("make_variance_optimised_bias: q= %s log_p= %s\n", q, log_p)
     PermutationBias(jk.P, log_p, α)
 end
 
