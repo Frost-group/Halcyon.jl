@@ -1,0 +1,26 @@
+# 1    2      3       4       5        6         7             8            9        10
+# k  count  P_hat  P_mult  P_dubois  P_full  P_lstm_mult  P_lstm_DuBois  P_lstm_MAP  PC
+
+set xlabel "Permutation family index"
+set ylabel "Probability"
+
+set logscale y
+#set yrange [1e-10:1e-1] # same as DeBois S2 axis
+#set yrange [1e-14:1e-1] # Dubois-p2 fit on the 33 Fermi gas goes down to 1e-14
+
+#set xrange [0:10143]
+
+# cat *_fit.dat | sort -rgk3 > t.dat # sort by MC
+# -rgk5 to sort by DuBois p2
+p "PermutationFamily_ProbabilityModel.dat" u 0:3 title "MC" lc black ,\
+  '' u 0:9 title "Fit:LSTM-on-Multiplicity" w p lc rgb "orange", \
+  '' u 0:5 title "Fit:DuBois-p2/Kappa" w p lc rgb "blue", \
+  '' u 0:6 title "Fit:MAP-on-DuBoisp2" w d lc rgb "green" ,\
+
+pause -1 "Rescale / relocate with mouse. Enter to dump PNG; Cmd-c to escape."
+
+set terminal pngcairo size 800,600 enhanced font 'Helvetica,14'
+set output "PermutationFamily_ProbabilityModel.png"
+replot
+
+

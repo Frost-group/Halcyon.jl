@@ -89,7 +89,7 @@ end
 
 
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
-    equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=1,
+    equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=5,
     lstm_epochs::Int=500, lstm_hidden::Int=64, lstm_embed::Int=16,
     lstm_lr::Float64=3e-3, use_kelbg::Bool=true,
     prefix="")
@@ -117,7 +117,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     MC_data, jk = permutation_family_mc(sys, params; equil, steps, measure_every)
 
     n_z = sum(MC_data.count)
-    @printf("\n MC Complete! N= %d  r_s= %g θ= %g  n_families= %d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, n_z)
+    @printf("\n MC Complete! N= %d  r_s= %g θ= %g  n_families= %d  Visited_families= %d  Z-samples=%d\n", N, r_s, θ, MC_data.n_families, length(MC_data.count), n_z)
 
     # save reservoir of samples
     open("$(prefix)_reservoir.dat", "w") do io
@@ -177,19 +177,19 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
     # ---------------------------------------------------------------
     # LSTM fits: three variants with increasing prior knowledge
     # ---------------------------------------------------------------
-    println("Unique data points (per epoch): $(length(MC_data.count))")
+    println("Unique data points (per epoch): $(length(MC_data.count)) / p(N)=$(MC_data.n_families)")
 
     lstm_kw = (; n_embed=lstm_embed, n_hidden=lstm_hidden, epochs=lstm_epochs, lr=lstm_lr)
 
     # 1. Multiplicity prior — gets M(λ) factors for free (θ=0)
     #   - essentially this just tells us that LSTM alone is terrible, KL divergence stays massive
-    println("Training LSTM (multiplicity prior)...")
+    println("\nTraining LSTM (multiplicity prior)...")
     model_lstm_mult = fit(LSTMPermutationModel, MC_data; prior=model_mult, lstm_kw...)
     # 2. DuBois prior — gets M(λ) + κ-penalty for free
-    println("Training LSTM (DuBois prior)...")
+    println("\nTraining LSTM (DuBois prior)...")
     model_lstm_DuBois = fit(LSTMPermutationModel, MC_data; prior=model_dubois, lstm_kw...)
     # 3. LSTM on MAP, so already optim Bayesian Theta-model
-    println("Training LSTM (MAP-on-DuBois prior)...")
+    println("\nTraining LSTM (MAP-on-DuBois prior)...")
     model_lstm_MAP = fit(LSTMPermutationModel, MC_data; prior=model_map, lstm_kw...)
 
     # ---------------------------------------------------------------
@@ -243,10 +243,35 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         println(m)
     end
 
+    # ---------------------------------------------------------------
+    # Write sector probabilities comparison
+    # ---------------------------------------------------------------
+    q_mult = probabilities(model_mult, MC_data)
+    q_dubois = probabilities(model_dubois, MC_data)
+    q_full = probabilities(model_full, MC_data)
+    q_lmult = probabilities(model_lstm_mult, MC_data)
+    q_ldub = probabilities(model_lstm_DuBois, MC_data)
+    q_lMAP = probabilities(model_lstm_MAP, MC_data)
+    n_tot = sum(MC_data.count)
+
+    filename = "$(prefix)_PermutationFamily_ProbabilityModel.dat"
+    open(filename, "w") do io
+        println(io, "# k  count  P_hat  P_mult  P_dubois  P_full  P_lstm_mult  P_lstm_DuBois  P_lstm_MAP  PC")
+        for k in 1:MC_data.n_families
+            c = MC_data.count[k]
+            p_hat = c > 0 ? c / n_tot : 0.0
+            C_k = C_from_rank(k, N, MC_data.P)
+            @printf(io, "%8d  %8d  %.5e  %.5e  %.5e  %.5e  %.5e  %.5e  %.5e  %s\n",
+                k, c, p_hat, q_mult[k], q_dubois[k], q_full[k],
+                q_lmult[k], q_ldub[k], q_lMAP[k], string(C_k))
+        end
+    end
+    println("Wrote $(filename).")
+
     # ===============================================================
     # Importance-sampled MC using fitted model as bias
     # ===============================================================
-    bias_α = 1.0  # gentle softening; α=1.0 for full flat-histogram; sort of Wang-Landau
+    bias_α = 0.7  # gentle softening; α=1.0 for full flat-histogram; sort of Wang-Landau
     # experiments showed α=1.0 was terrible - threw MC into the OPPOSITE undersampling, i.e.
     # forced condensation if not present
     biasmodel = model_lstm_MAP
@@ -303,29 +328,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
 
     @printf("\n# Biased MC Estimates (α=%.2f, debiased):\n", bias_α)
 
-    # ---------------------------------------------------------------
-    # Write sector probabilities comparison
-    # ---------------------------------------------------------------
-    q_mult = probabilities(model_mult, MC_data)
-    q_dubois = probabilities(model_dubois, MC_data)
-    q_full = probabilities(model_full, MC_data)
-    q_lmult = probabilities(model_lstm_mult, MC_data)
-    q_ldub = probabilities(model_lstm_DuBois, MC_data)
-    q_lMAP = probabilities(model_lstm_MAP, MC_data)
-    n_tot = sum(MC_data.count)
 
-    open("$(prefix)_PermutationFamily_LSTM_comparison.dat", "w") do io
-        println(io, "# k  count  P_hat  P_mult  P_dubois  P_full  P_lstm_mult  P_lstm_DuBois  P_lstm_MAP  PC")
-        for k in 1:MC_data.n_families
-            c = MC_data.count[k]
-            p_hat = c > 0 ? c / n_tot : 0.0
-            C_k = C_from_rank(k, N, MC_data.P)
-            @printf(io, "%8d  %8d  %.5e  %.5e  %.5e  %.5e  %.5e  %.5e  %.5e  %s\n",
-                k, c, p_hat, q_mult[k], q_dubois[k], q_full[k],
-                q_lmult[k], q_ldub[k], q_lMAP[k], string(C_k))
-        end
-    end
-    println("Wrote $(prefix)_PermutationFamily_LSTM_comparison.dat")
 
     return MC_data, MC_biased, bias, models
 end
@@ -339,7 +342,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
     Nmagic = 33
-    magicsteps = 6_000_000
+    magicsteps = 12_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq1")
@@ -347,12 +350,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
     #     Expected E/N: -0.0403 Ha
     #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq10")
 
-#    magicsteps = 1_000_000
+    #    magicsteps = 1_000_000
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha
-    #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
+    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
     # rs=10.0 -> -0.1038 Ha
-    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
+    #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
 
     # Dornheim et al. 2025, JCP 163, 154101 - Reweighting estimator
     # MC_and_fit_model(; N=4, r_s=0.5, θ=1.0, steps=100_000_000,)
