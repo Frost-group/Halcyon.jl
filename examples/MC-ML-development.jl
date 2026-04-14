@@ -342,7 +342,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # N is magic-number from filling 3D Fermi sphere
     #   So N=1, 7, 19, 33
     Nmagic = 33
-    magicsteps = 12_000_000
+    magicsteps = 100_000_000
     # DuBois Table 1: rs=1.0, theta=1.0 (N=33)
     #     Expected E/N: 8.69 Ha
     #    MC_and_fit_model(; N=Nmagic, θ=1.0, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq1_rseq1")
@@ -353,9 +353,9 @@ if abspath(PROGRAM_FILE) == @__FILE__
     #    magicsteps = 1_000_000
     # Low temperature: theta=0.125
     # rs=1.0 -> 2.35 Ha
-    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
+    #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
     # rs=10.0 -> -0.1038 Ha
-    #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
+    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
 
     # Dornheim et al. 2025, JCP 163, 154101 - Reweighting estimator
     # MC_and_fit_model(; N=4, r_s=0.5, θ=1.0, steps=100_000_000,)
