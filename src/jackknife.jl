@@ -252,16 +252,15 @@ around with the Fermionic signs.
 
 """
 function jackknife_error_guide(bias::PermutationBias, jk::JackknifePermutationStats; α::Float64=1.0)
-    # conditional broadcasting (!)
-    q = @. ifelse(jk.pE_k_se > 0.0, jk.pE_k_se, 0.0)
-    # OK, experiments thing this is too harsh: only observe first sector after this (!)
-    # I need to think a bit harder about turning the jacknife standard error into a probability to revisit.
-    q = q ./ sum(q) # normalise probability
-    min = 1e-4 * 1/jk.n_families # minimum intent: 1e-4 * natural occurance. Perhaps use number of microstates / degerenacy?
-    log_p = [q[k] > min ? -log(q[k]) : -log(min) for k in 1:jk.n_families]
-    jk.n_families<20 && @printf("jacknife_error_guide: q= %s log_p= %s\n", q, log_p)
+    # intrinsic physical variance σ_k ≈ SE(E_k) * sqrt(N_k_fraction)
+    σ_k = @. jk.E_k_se * sqrt(max(0.0, jk.p_k_jack))
+    # Stops counts rate messing up rare sector variance
+    min = 1e-4 * maximum(σ_k) # minimum intent: 1e-4 * natural occurance.
+    σ_k = σ_k ./ sum(σ_k) # normalise probability
+    log_p = [σ_k[k] > min ? -log(σ_k[k]) : -log(min) for k in 1:jk.n_families]
+    jk.n_families < 20 && @printf("jacknife_error_guide: q= %s log_p= %s\n", q, log_p)
     log_p .+= bias.log_p # mix in previous guidance
-    jk.n_families<20 && @printf("jacknife_error_guide, combined: log_p= %s\n", log_p)
+    jk.n_families < 20 && @printf("jacknife_error_guide, combined: log_p= %s\n", log_p)
     PermutationBias(jk.P, log_p, α)
 end
 
