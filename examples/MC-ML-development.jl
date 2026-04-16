@@ -122,16 +122,18 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         λ_coulomb = 0.5
         λ_kelbg = sqrt(2 * λħ * β / M) # Important to prevent Coulomb singularity
         
-        sys = System(M, N; D=2, β=β, λ=λħ, L=L,
+        # Default M=100 OK? c.f. Dornheim ?
+        sys = System(M, N; D=2, β=β, λ=λħ,L=L,
             V=HarmonicPotential(k=k_trap), 
             U=KelbgCoulombPotential(g=λ_coulomb, λ=λ_kelbg), 
             statistics=Fermions)
             
-        # Keep j_max small to reduce Levy flight steps that escape harmonic bounds
+        # Keep j_max small to reduce Levy flight steps which would get rejected if crossing
+        # the harmonic potential
         params = WormParams(C=0.7, j_max=min(20, M ÷ 2), r_max=8.0)
         E_bg = 0.0
 
-        @printf("2D Harmonic trap: energy units are oscillator hbar-omega. (So 'Ha' below)")
+        @printf("2D Harmonic trap: energy units are oscillator hbar-omega. (So 'Ha' below)\n")
         @printf("|>|>|>|>|>0> WORM: N= %d β= %g (L= %g λ= %g) [2D TRAP] \n", N, β, L, λħ)
     else
         error("Unsupported system_type: ", system_type)
@@ -386,7 +388,11 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # N=4,28 ('standard reference')
     # N=40,66 in other figures
 
-    # Dornheim et al. 2019 Permutation trap (2D harmonic potential + Coulomb)
+    # Dornheim et al. 2019 PRE 'Fermion sign problem...' (2D/3D harmonic potential with Coulomb/dipole)
     # Nb: just used θ parameter to specify β.
-    MC_and_fit_model(; N=20, θ=1.0, steps=100_000_000, system_type=:trap, prefix="TRAP_N10_beta0p5")
+    # Table I ibid. ; N=3..10 with β=1; then N=4..20 with β=0.3
+    MC_and_fit_model(; N=10, θ=0.3, steps=10_000_000, system_type=:trap, prefix="TRAP_N10_beta0p3")
+    MC_and_fit_model(; N=20, θ=0.3, steps=10_000_000, system_type=:trap, prefix="TRAP_N20_beta0p3")
+    MC_and_fit_model(; N=10, θ=1.0, steps=10_000_000, system_type=:trap, prefix="TRAP_N10_beta1p0")
 end
+
