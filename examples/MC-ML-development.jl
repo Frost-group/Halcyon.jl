@@ -91,27 +91,51 @@ end
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
     equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=5,
     lstm_epochs::Int=500, lstm_hidden::Int=64, lstm_embed::Int=16,
-    lstm_lr::Float64=3e-3, use_kelbg::Bool=true,
+    lstm_lr::Float64=3e-3, use_kelbg::Bool=true, system_type::Symbol=:ueg,
     prefix="")
     λħ = 0.5
-    (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
 
-    # Kelbg smoothing parameter: λ² = ħ²τ / (2μ). For identical particles μ = m/2,
-    # so λ² = ħ²τ / m = 2 * (ħ²/2m) * τ = 2 * λ_sys * (β/M)
-    λ_kelbg = sqrt(2 * λħ * (β / M))
+    if system_type == :ueg
+        (; L, β) = ueg_theta_parameters(; N, θ, r_s, λ=λħ)
 
-    pair_pot = use_kelbg ? YakubRonchiKelbgPotential(L=L, g=1.0, λ=λ_kelbg) : YakubRonchiPotential(L=L, g=1.0)
-    sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=pair_pot)
-    params = default_worm_params(sys)
+        # Kelbg smoothing parameter: λ² = ħ²τ / (2μ). For identical particles μ = m/2,
+        # so λ² = ħ²τ / m = 2 * (ħ²/2m) * τ = 2 * λ_sys * (β/M)
+        λ_kelbg = sqrt(2 * λħ * (β / M))
 
-    @printf("|>|>|>|>|>0> WORM: N= %d θ= %g r_s= %g (L= %g β= %g λ= %g) \n", N, θ, r_s, L, β, λħ)
-    if use_kelbg
-        @printf("  Using Kelbg-smoothed potential with λ= %g, λ² = %g\n", λ_kelbg, λ_kelbg^2)
+        pair_pot = use_kelbg ? YakubRonchiKelbgPotential(L=L, g=1.0, λ=λ_kelbg) : YakubRonchiPotential(L=L, g=1.0)
+        sys = make_periodic_fermion_system(; M, N, β, L, λ=λħ, pair=pair_pot)
+        params = default_worm_params(sys)
+
+        @printf("|>|>|>|>|>0> WORM: N= %d θ= %g r_s= %g (L= %g β= %g λ= %g) [UEG] \n", N, θ, r_s, L, β, λħ)
+        if use_kelbg
+            @printf("  Using Kelbg-smoothed potential with λ= %g, λ² = %g\n", λ_kelbg, λ_kelbg^2)
+        end
+
+        # Add Jellium Background; Yakub-Ronchi
+        E_bg = yakub_ronchi_background_constant(L, N)
+        @printf("Calculated Yakub-Ronchi background N= %d L= %g E= %g Ha\n", N, L, E_bg)
+    elseif system_type == :trap
+        # Following Dornheim et al. (2023) fictitious particle paper parameters
+        β = θ # Reuse θ argument for beta in trap
+        L = 50.0 # Box size; I don't think there's any real cost to having this large? 
+        k_trap = 1.0 # V = 0.5 * k * r^2
+        λ_coulomb = 0.5
+        λ_kelbg = sqrt(2 * λħ * β / M) # Important to prevent Coulomb singularity
+        
+        sys = System(M, N; D=2, β=β, λ=λħ, L=L,
+            V=HarmonicPotential(k=k_trap), 
+            U=KelbgCoulombPotential(g=λ_coulomb, λ=λ_kelbg), 
+            statistics=Fermions)
+            
+        # Keep j_max small to reduce Levy flight steps that escape harmonic bounds
+        params = WormParams(C=0.7, j_max=min(20, M ÷ 2), r_max=8.0)
+        E_bg = 0.0
+
+        @printf("2D Harmonic trap: energy units are oscillator hbar-omega. (So 'Ha' below)")
+        @printf("|>|>|>|>|>0> WORM: N= %d β= %g (L= %g λ= %g) [2D TRAP] \n", N, β, L, λħ)
+    else
+        error("Unsupported system_type: ", system_type)
     end
-
-    # Add Jellium Background; Yakub-Ronchi
-    E_bg = yakub_ronchi_background_constant(L, N)
-    @printf("Calculated Yakub-Ronchi background N= %d L= %g E= %g Ha\n", N, L, E_bg)
 
     println("Running threaded MC...")
     MC_data, jk = permutation_family_mc(sys, params; equil, steps, measure_every)
@@ -355,10 +379,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # rs=1.0 -> 2.35 Ha
     #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=1.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq1")
     # rs=10.0 -> -0.1038 Ha
-    MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
+    #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
 
     # Dornheim et al. 2025, JCP 163, 154101 - Reweighting estimator
     # MC_and_fit_model(; N=4, r_s=0.5, θ=1.0, steps=100_000_000,)
     # N=4,28 ('standard reference')
     # N=40,66 in other figures
+
+    # Dornheim et al. 2019 Permutation trap (2D harmonic potential + Coulomb)
+    # Nb: just used θ parameter to specify β.
+    MC_and_fit_model(; N=20, θ=1.0, steps=100_000_000, system_type=:trap, prefix="TRAP_N10_beta0p5")
 end
