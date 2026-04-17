@@ -89,6 +89,7 @@ end
 
 
 function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int=100,
+    λ_coulomb::Float64 = 0.5,
     equil::Int=100_000, steps::Int=1_000_000, measure_every::Int=5,
     lstm_epochs::Int=500, lstm_hidden::Int=64, lstm_embed::Int=16,
     lstm_lr::Float64=3e-3, use_kelbg::Bool=true, system_type::Symbol=:ueg,
@@ -119,7 +120,6 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         β = θ # Reuse θ argument for beta in trap
         L = 50.0 # Box size; I don't think there's any real cost to having this large?
         k_trap = 1.0 # V = 0.5 * k * r^2
-        λ_coulomb = 0.5
         λ_kelbg = sqrt(2 * λħ * β / M) # Important to prevent Coulomb singularity
 
         # Dornheim, Table I 'all results... P=200 Im time props.'
@@ -135,7 +135,7 @@ function MC_and_fit_model(; N::Int=33, θ::Float64=0.5, r_s::Float64=2.0, M::Int
         E_bg = 0.0
 
         @printf("2D Harmonic trap: energy units are oscillator hbar-omega. (So 'Ha' below)\n")
-        @printf("|>|>|>|>|>0> WORM: N= %d β= %g (L= %g λ= %g) [2D TRAP] \n", N, β, L, λħ)
+        @printf("|>|>|>|>|>0> WORM: N= %d β= %g (L= %g λ= %g) [2D TRAP] \n", N, β, L, λ_coulomb)
     else
         error("Unsupported system_type: ", system_type)
     end
@@ -393,10 +393,15 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # Dornheim et al. 2019 PRE 'Fermion sign problem...' (2D/3D harmonic potential with Coulomb/dipole)
     # Nb: just used θ parameter to specify β.
     # Table I ibid. ; N=3..10 with β=1; then N=4..20 with β=0.3
-    MC_and_fit_model(; N=6, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N6_beta0p3")
-    MC_and_fit_model(; N=6, θ=1.0, steps=STEPS, system_type=:trap, prefix="TRAP_N6_beta1p0")
+#    MC_and_fit_model(; N=6, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N6_beta0p3")
+#    MC_and_fit_model(; N=6, θ=1.0, steps=STEPS, system_type=:trap, prefix="TRAP_N6_beta1p0")
 
-    MC_and_fit_model(; N=10, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N10_beta0p3")
-    MC_and_fit_model(; N=20, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N20_beta0p3")
-    MC_and_fit_model(; N=10, θ=1.0, steps=STEPS, system_type=:trap, prefix="TRAP_N10_beta1p0")
+#    MC_and_fit_model(; N=10, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N10_beta0p3")
+#    MC_and_fit_model(; N=20, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N20_beta0p3")
+#    MC_and_fit_model(; N=10, θ=1.0, steps=STEPS, system_type=:trap, prefix="TRAP_N10_beta1p0")
+#  ^^^ these data run at work and STDOUT saved as 2026-04-17_Harmonic_trap_runs_work.txt
+
+    for λ in [0.0, 0.01, 0.05, 0.1, 0.3, 0.5, 1.0, 3.0, 10.0]
+        MC_and_fit_model(; N=6, θ=1.0, steps=10_000_000, system_type=:trap, prefix="TRAP_N10_beta1p0_lambda$(λ)", λ_coulomb=λ)
+    end
 end
