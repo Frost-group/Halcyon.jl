@@ -258,7 +258,7 @@ function jackknife_error_guide(bias::PermutationBias, jk::JackknifePermutationSt
     min = 1e-4 * maximum(σ_k) # minimum intent: 1e-4 * natural occurance.
     σ_k = σ_k ./ sum(σ_k) # normalise probability
     log_p = [σ_k[k] > min ? -log(σ_k[k]) : -log(min) for k in 1:jk.n_families]
-    jk.n_families < 20 && @printf("jacknife_error_guide: q= %s log_p= %s\n", q, log_p)
+    jk.n_families < 20 && @printf("jacknife_error_guide: q= %s log_p= %s\n", σ_k, log_p)
     log_p .+= bias.log_p # mix in previous guidance
     jk.n_families < 20 && @printf("jacknife_error_guide, combined: log_p= %s\n", log_p)
     PermutationBias(jk.P, log_p, α)
