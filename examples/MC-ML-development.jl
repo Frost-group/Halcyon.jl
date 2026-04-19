@@ -384,6 +384,19 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # rs=10.0 -> -0.1038 Ha
     #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
 
+     # UEG sweep 1 for Trento 
+    for MS in [1, 3, 10, 30, 100, 300]
+        for N in [7,19,33] # magic Fermi sphere filling values...
+            for θ in [1.0, 0.125]
+                for r_s in [1.0, 10.0]
+                    MC_and_fit_model(; N=N, θ=θ, r_s=r_s, steps=MS*1_000_000, system_type=:ueg, 
+                         prefix="UEG_N$(N)_θ$(θ)_r_s$(r_s)_beta1_MS$(MS)")
+                end
+            end
+        end
+    end
+ # as > 2026-04-18-UEGSweep1.dat on laptop 
+
     # Dornheim et al. 2025, JCP 163, 154101 - Reweighting estimator
     # MC_and_fit_model(; N=4, r_s=0.5, θ=1.0, steps=100_000_000,)
     # N=4,28 ('standard reference')
@@ -401,7 +414,25 @@ if abspath(PROGRAM_FILE) == @__FILE__
 #    MC_and_fit_model(; N=10, θ=1.0, steps=STEPS, system_type=:trap, prefix="TRAP_N10_beta1p0")
 #  ^^^ these data run at work and STDOUT saved as 2026-04-17_Harmonic_trap_runs_work.txt
 
-    for λ in [0.0, 0.01, 0.05, 0.1, 0.3, 0.5, 1.0, 3.0, 10.0]
-        MC_and_fit_model(; N=6, θ=1.0, steps=10_000_000, system_type=:trap, prefix="TRAP_N10_beta1p0_lambda$(λ)", λ_coulomb=λ)
-    end
+#    for λ in [0.0, 0.01, 0.05, 0.1, 0.3, 0.5, 1.0, 3.0, 10.0]
+#        MC_and_fit_model(; N=6, θ=1.0, steps=100_000_000, system_type=:trap, prefix="TRAP_N10_beta1p0_MC100M_lambda$(λ)", λ_coulomb=λ)
+#    end
+    ## 1000 MC data on ZORAC 'lambda sweep'
+    # 100 MC on laptop '2026-04-17_lambda_sweep_100MC.dat'
+
+#    STEPS=10_000_000
+#    for β in [0.3, 0.6, 0.8, 1.0, 1.3, 1.5, 2.0, 3.0, 5.0, 10.0]
+#        MC_and_fit_model(; N=6, θ=β, steps=STEPS, system_type=:trap, prefix="TRAP_N6_beta$(β)")
+#    end
+#    for N in [3,4,6,8,10,12]
+#        MC_and_fit_model(; N=N, θ=1.0, steps=STEPS, system_type=:trap, prefix="TRAP_N$(N)_beta1")
+#    end
+#    These data -> 2026-04-17_N_and_beta_sweep.dat on laptop
+
+    # convergence versus budget
+#    for MS in [1, 3, 10, 30, 100, 300]
+#        MC_and_fit_model(; N=6, θ=1.0, steps=MS*1_000_000, system_type=:trap, prefix="TRAP_N6_beta1_MS$(MS)")
+#    end
+# These data --> 2026-04-17_N_convergence_vs_budget.dat
+
 end
