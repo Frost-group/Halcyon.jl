@@ -1,0 +1,20 @@
+# UEG_N33_θ0.125_r_s1.0_beta1_MS300_theta_family.dat
+
+set title "Model Parameter Comparison"
+set xlabel "l"
+set ylabel "Theta"
+set key outside
+
+plot "UEG_N33_θ0.125_r_s1.0_beta1_MS300_theta_family.dat" using 1:2 with linespoints title "Infinite-T", \
+     "" using 1:6 with linespoints axes x1y2 title "MC P(l)", \
+    "" using 1:3 with linespoints title "DuBois", \
+     "" using 1:5 with linespoints title "MaxEnt", \
+     "" using 1:4 with linespoints title "MAP-on-DuBois", \
+
+pause -1 "Rescale / relocate with mouse. Enter to dump PNG; Cmd-c to escape."
+
+set terminal pngcairo size 1600,1200 enhanced font "Helvetica,24" linewidth 2.5
+set output "UEG_N33_θ0.125_r_s1.0_beta1_MS300_theta_family.png"
+replot
+
+

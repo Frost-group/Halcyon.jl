@@ -1,0 +1,43 @@
+reset
+set terminal qt size 1000,600 title "Fermion Energy Distributions" font "Helvetica,12"
+
+#set title "Reservour: PIMC energy samples by permutation family" font "Helvetica,14"
+set xlabel "Energy (Hartree)"
+set ylabel "Density"
+
+# Clean up the borders
+set border 3
+set tics nomirror
+set grid ytics lc rgb "#e0e0e0"
+
+# Move legend out of the way
+#set key outside right top
+
+set xrange [-100:100]
+set yrange [-0.1:0.20]
+
+# raw data as "rug plot" below y=0 (using rand(0) to jitter them vertically)
+# The smooth kdensity estimator for the actual distributions
+set datafile columnheaders
+stats INPUTFILE using 0 every ::0::0 nooutput
+ # mad up command above to stop stats from reading whole file and bailing on all the NaN
+cols = STATS_columns
+print sprintf("Detected %d families.", cols)
+
+set samples 1000 # moar points in the kdensity thingy ==> less jagged 
+
+
+plot \
+    for [i=1:cols] INPUTFILE using i:(-0.1+0.1*rand(0)) \
+        with points pt 7 ps 0.3 lc i title columnhead, \
+    for [i=1:cols] '' using i:(1/1000.0) \
+        smooth kdensity bandwidth 1.0 with lines lw 2 lc i title sprintf("C %d: %s", i,columnhead(i))
+
+#unset key # for if N>7... could probablt automate this?
+
+set terminal pngcairo size 1600,1200 enhanced font "Helvetica,24" linewidth 2.5
+set output OUTPUTFILE
+
+replot
+
+

@@ -385,16 +385,16 @@ if abspath(PROGRAM_FILE) == @__FILE__
     #MC_and_fit_model(; N=Nmagic, θ=0.125, r_s=10.0, steps=magicsteps, prefix="N$(Nmagic)_θeq0p125_rseq10")
 
      # UEG sweep 1 for Trento 
-    for MS in [1, 3, 10, 30, 100, 300]
-        for N in [7,19,33] # magic Fermi sphere filling values...
-            for θ in [1.0, 0.125]
-                for r_s in [1.0, 10.0]
-                    MC_and_fit_model(; N=N, θ=θ, r_s=r_s, steps=MS*1_000_000, system_type=:ueg, 
-                         prefix="UEG_N$(N)_θ$(θ)_r_s$(r_s)_beta1_MS$(MS)")
-                end
-            end
-        end
-    end
+#    for MS in [1, 3, 10, 30, 100, 300]
+#        for N in [7,19,33] # magic Fermi sphere filling values...
+#            for θ in [1.0, 0.125]
+#                for r_s in [1.0, 10.0]
+#                    MC_and_fit_model(; N=N, θ=θ, r_s=r_s, steps=MS*1_000_000, system_type=:ueg, 
+#                         prefix="UEG_N$(N)_θ$(θ)_r_s$(r_s)_beta1_MS$(MS)")
+#                end
+#            end
+#        end
+#    end
  # as > 2026-04-18-UEGSweep1.dat on laptop 
 
     # Dornheim et al. 2025, JCP 163, 154101 - Reweighting estimator
@@ -402,11 +402,11 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # N=4,28 ('standard reference')
     # N=40,66 in other figures
 
-    STEPS = 100_000_000
+    STEPS = 1_000_000
     # Dornheim et al. 2019 PRE 'Fermion sign problem...' (2D/3D harmonic potential with Coulomb/dipole)
     # Nb: just used θ parameter to specify β.
     # Table I ibid. ; N=3..10 with β=1; then N=4..20 with β=0.3
-#    MC_and_fit_model(; N=6, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N6_beta0p3")
+    MC_and_fit_model(; N=6, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N6_beta0p3")
 #    MC_and_fit_model(; N=6, θ=1.0, steps=STEPS, system_type=:trap, prefix="TRAP_N6_beta1p0")
 
 #    MC_and_fit_model(; N=10, θ=0.3, steps=STEPS, system_type=:trap, prefix="TRAP_N10_beta0p3")
